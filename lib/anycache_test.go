@@ -3,6 +3,7 @@ package anycache
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 func TestCache(t *testing.T) {
@@ -36,5 +37,37 @@ func TestCache(t *testing.T) {
 
 	if val != "" {
 		t.Errorf("Expected to get empty string, but got '%v'", val)
+	}
+}
+
+func TestCacheConcurrency(t *testing.T) {
+	cache := NewCache()
+
+	results := make(chan string)
+
+	go func(c *Cache, ch chan string) {
+		val, _ := c.Cache("testKey", func() (string, error) {
+			time.Sleep(time.Millisecond)
+			return "testValue", nil
+		})
+		ch <- val
+	}(&cache, results)
+
+	go func(c *Cache, ch chan string) {
+		val, _ := c.Cache("testKey", func() (string, error) {
+			time.Sleep(time.Millisecond)
+			return "testValue1", nil
+		})
+		ch <- val
+	}(&cache, results)
+
+	val1, val2 := <-results, <-results
+
+	if val1 != "testValue" && val1 != "testValue1" {
+		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
+	}
+
+	if val1 != val2 {
+		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
 	}
 }

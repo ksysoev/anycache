@@ -3,6 +3,7 @@ package anycache
 import (
 	"errors"
 	"fmt"
+	"sync"
 )
 
 const NOT_EXISTEN_KEY_TTL = -2
@@ -17,7 +18,9 @@ type CacheStorage interface {
 	Del(string) (bool, error)
 }
 type Cache struct {
-	storage CacheStorage
+	storage    CacheStorage
+	globalLock sync.Mutex
+	locks      map[string]*sync.Mutex
 }
 
 type ValueGenerator func() (string, error)
@@ -27,11 +30,37 @@ func (e KeyNotExistError) Error() string {
 }
 
 func NewCache() Cache {
-	return Cache{storage: MapCacheStorage{}}
+	return Cache{
+		storage:    MapCacheStorage{},
+		globalLock: sync.Mutex{},
+		locks:      map[string]*sync.Mutex{},
+	}
 }
 
-func (c Cache) Cache(key string, generator ValueGenerator) (string, error) {
+func (c *Cache) Cache(key string, generator ValueGenerator) (string, error) {
 	value, err := c.storage.Get(key)
+
+	if err == nil {
+		return value, nil
+	}
+
+	if !errors.Is(err, KeyNotExistError{key}) {
+		return EMPTY_VALUE, err
+	}
+
+	c.globalLock.Lock()
+	l, ok := c.locks[key]
+	if !ok {
+		l = &(sync.Mutex{})
+		c.locks[key] = l
+	}
+	c.globalLock.Unlock()
+
+	l.Lock()
+	defer l.Unlock()
+	defer delete(c.locks, key)
+
+	value, err = c.storage.Get(key)
 
 	if err == nil {
 		return value, nil
