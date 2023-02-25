@@ -5,17 +5,8 @@ import (
 	"testing"
 )
 
-func TestSimpleStorageSet(t *testing.T) {
-	storage := SimpleStorage{}
-	err := storage.Set("testKey", "testValue")
-
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-}
-
-func TestSimpleStorageGetSet(t *testing.T) {
-	storage := SimpleStorage{}
+func TestMapCacheStorageGetSet(t *testing.T) {
+	storage := MapCacheStorage{}
 
 	testKey := "testKey"
 	testValue := "testValue"

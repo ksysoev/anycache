@@ -1,2 +1,2 @@
 test:
-	@cd lib; go test
+	@cd lib; go test -v
