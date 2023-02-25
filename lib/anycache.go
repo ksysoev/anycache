@@ -20,6 +20,8 @@ type Cache struct {
 	storage CacheStorage
 }
 
+type ValueGenerator func() (string, error)
+
 func (e KeyNotExistError) Error() string {
 	return fmt.Sprintf("Key %s is not found", e.key)
 }
@@ -28,14 +30,20 @@ func NewCache() Cache {
 	return Cache{storage: MapCacheStorage{}}
 }
 
-func (c Cache) Cache(key string, newValue string) (string, error) {
+func (c Cache) Cache(key string, generator ValueGenerator) (string, error) {
 	value, err := c.storage.Get(key)
 
 	if err == nil {
 		return value, nil
 	}
 
-	if !errors.Is(err, &KeyNotExistError{}) {
+	if !errors.Is(err, KeyNotExistError{key}) {
+		return EMPTY_VALUE, err
+	}
+
+	newValue, err := generator()
+
+	if err != nil {
 		return EMPTY_VALUE, err
 	}
 
