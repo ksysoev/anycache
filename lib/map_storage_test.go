@@ -46,6 +46,20 @@ func TestMapCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
+	hasTTL, ttl, err := storage.TTL(testKey)
+
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
+	if !hasTTL {
+		t.Errorf("Expected to have TTL, but it doesnt")
+	}
+
+	if ttl.Microseconds() <= 0 || ttl.Microseconds() >= 1000 {
+		t.Errorf("Expected to have TTL less than start value, but it has value %v", ttl.Microseconds())
+	}
+
 	val, err := storage.Get(testKey)
 
 	if err != nil {
@@ -62,4 +76,16 @@ func TestMapCacheStorageTTL(t *testing.T) {
 	if !errors.Is(err, KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v' %v", KeyNotExistError{}, err, val)
 	}
+
+	_ = storage.Set(testKey, testValue, CacheItemOptions{})
+	hasTTL, _, err = storage.TTL(testKey)
+
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
+	if hasTTL {
+		t.Errorf("Expected to have no TTL, but it does")
+	}
+
 }

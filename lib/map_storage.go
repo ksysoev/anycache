@@ -51,14 +51,33 @@ func (s MapCacheStorage[K, V]) Set(key K, value V, options CacheItemOptions) err
 	return nil
 }
 
-func (s MapCacheStorage[K, V]) TTL(key K) (int64, error) {
-	_, ok := s[key]
+func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
+	var ttl time.Duration
+	hasTTL := false
 
-	if ok {
-		return NO_EXPIRATION_KEY_TTL, nil
+	item, ok := s[key]
+
+	if !ok {
+		return hasTTL, ttl, KeyNotExistError{}
 	}
 
-	return NOT_EXISTEN_KEY_TTL, nil
+	if !item.hasTTL {
+		return item.hasTTL, ttl, nil
+	}
+
+	if item.expiresAt.Before(time.Now()) {
+		_, err := s.Del(key)
+
+		if err != nil {
+			return hasTTL, ttl, err
+		}
+
+		return hasTTL, ttl, KeyNotExistError{}
+	}
+
+	ttl = item.expiresAt.Sub(time.Now())
+
+	return item.hasTTL, ttl, nil
 }
 
 func (s MapCacheStorage[K, V]) Del(key K) (bool, error) {

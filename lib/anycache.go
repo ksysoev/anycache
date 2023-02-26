@@ -14,7 +14,7 @@ const EMPTY_VALUE = ""
 type CacheStorage[K comparable, V any] interface {
 	Get(K) (V, error)
 	Set(K, V, CacheItemOptions) error
-	TTL(K) (int64, error)
+	TTL(K) (bool, time.Duration, error)
 	Del(K) (bool, error)
 }
 type Cache[K comparable, V any] struct {
