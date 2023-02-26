@@ -9,7 +9,7 @@ import (
 func TestCache(t *testing.T) {
 	cache := NewCache[string, string]()
 
-	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil })
+	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -19,7 +19,7 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	val, err = cache.Cache("testKey", func() (string, error) { return "testValue1", nil })
+	val, err = cache.Cache("testKey", func() (string, error) { return "testValue1", nil }, CacheItemOptions{})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -29,7 +29,7 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	val, err = cache.Cache("testKey1", func() (string, error) { return "", errors.New("TestError") })
+	val, err = cache.Cache("testKey1", func() (string, error) { return "", errors.New("TestError") }, CacheItemOptions{})
 
 	if err == errors.New("TestError") {
 		t.Errorf("Expected to get TestError, but got %v", err)
@@ -49,7 +49,7 @@ func TestCacheConcurrency(t *testing.T) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue", nil
-		})
+		}, CacheItemOptions{})
 		ch <- val
 	}(&cache, results)
 
@@ -57,7 +57,7 @@ func TestCacheConcurrency(t *testing.T) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue1", nil
-		})
+		}, CacheItemOptions{})
 		ch <- val
 	}(&cache, results)
 

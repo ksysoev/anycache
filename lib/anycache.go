@@ -3,6 +3,7 @@ package anycache
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 const NOT_EXISTEN_KEY_TTL = -2
@@ -12,7 +13,7 @@ const EMPTY_VALUE = ""
 
 type CacheStorage[K comparable, V any] interface {
 	Get(K) (V, error)
-	Set(K, V) error
+	Set(K, V, CacheItemOptions) error
 	TTL(K) (int64, error)
 	Del(K) (bool, error)
 }
@@ -22,8 +23,8 @@ type Cache[K comparable, V any] struct {
 	locks      map[K]*sync.Mutex
 }
 
-func (KeyNotExistError) Error() string {
-	return "Key is not found"
+type CacheItemOptions struct {
+	ttl time.Duration
 }
 
 func NewCache[K comparable, V any]() Cache[K, V] {
@@ -34,7 +35,7 @@ func NewCache[K comparable, V any]() Cache[K, V] {
 	}
 }
 
-func (c *Cache[K, V]) Cache(key K, generator func() (V, error)) (V, error) {
+func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
 	value, err := c.storage.Get(key)
 
 	if err == nil {
@@ -75,7 +76,7 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error)) (V, error) {
 		return value, err
 	}
 
-	err = c.storage.Set(key, newValue)
+	err = c.storage.Set(key, newValue, options)
 
 	if err != nil {
 		return value, err
