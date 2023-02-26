@@ -2,7 +2,6 @@ package anycache
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -11,41 +10,39 @@ const NO_EXPIRATION_KEY_TTL = -1
 
 const EMPTY_VALUE = ""
 
-type CacheStorage interface {
-	Get(string) (string, error)
-	Set(string, string) error
-	TTL(string) (int64, error)
-	Del(string) (bool, error)
+type CacheStorage[K comparable, V any] interface {
+	Get(K) (V, error)
+	Set(K, V) error
+	TTL(K) (int64, error)
+	Del(K) (bool, error)
 }
-type Cache struct {
-	storage    CacheStorage
+type Cache[K comparable, V any] struct {
+	storage    CacheStorage[K, V]
 	globalLock sync.Mutex
-	locks      map[string]*sync.Mutex
+	locks      map[K]*sync.Mutex
 }
 
-type ValueGenerator func() (string, error)
-
-func (e KeyNotExistError) Error() string {
-	return fmt.Sprintf("Key %s is not found", e.key)
+func (KeyNotExistError) Error() string {
+	return "Key is not found"
 }
 
-func NewCache() Cache {
-	return Cache{
-		storage:    MapCacheStorage{},
+func NewCache[K comparable, V any]() Cache[K, V] {
+	return Cache[K, V]{
+		storage:    MapCacheStorage[K, V]{},
 		globalLock: sync.Mutex{},
-		locks:      map[string]*sync.Mutex{},
+		locks:      map[K]*sync.Mutex{},
 	}
 }
 
-func (c *Cache) Cache(key string, generator ValueGenerator) (string, error) {
+func (c *Cache[K, V]) Cache(key K, generator func() (V, error)) (V, error) {
 	value, err := c.storage.Get(key)
 
 	if err == nil {
 		return value, nil
 	}
 
-	if !errors.Is(err, KeyNotExistError{key}) {
-		return EMPTY_VALUE, err
+	if !errors.Is(err, KeyNotExistError{}) {
+		return value, err
 	}
 
 	c.globalLock.Lock()
@@ -57,8 +54,10 @@ func (c *Cache) Cache(key string, generator ValueGenerator) (string, error) {
 	c.globalLock.Unlock()
 
 	l.Lock()
-	defer l.Unlock()
-	defer delete(c.locks, key)
+	defer func() {
+		l.Unlock()
+		delete(c.locks, key)
+	}()
 
 	value, err = c.storage.Get(key)
 
@@ -66,20 +65,20 @@ func (c *Cache) Cache(key string, generator ValueGenerator) (string, error) {
 		return value, nil
 	}
 
-	if !errors.Is(err, KeyNotExistError{key}) {
-		return EMPTY_VALUE, err
+	if !errors.Is(err, KeyNotExistError{}) {
+		return value, err
 	}
 
 	newValue, err := generator()
 
 	if err != nil {
-		return EMPTY_VALUE, err
+		return value, err
 	}
 
 	err = c.storage.Set(key, newValue)
 
 	if err != nil {
-		return EMPTY_VALUE, err
+		return value, err
 	}
 
 	return newValue, nil

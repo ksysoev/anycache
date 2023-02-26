@@ -1,24 +1,24 @@
 package anycache
 
-type MapCacheStorage map[string]string
+type MapCacheStorage[K comparable, V any] map[K]V
 
-func (s MapCacheStorage) Get(key string) (string, error) {
+func (s MapCacheStorage[K, V]) Get(key K) (V, error) {
 	value, ok := s[key]
 
 	if ok {
 		return value, nil
 	}
 
-	return EMPTY_VALUE, KeyNotExistError{key: key}
+	return value, KeyNotExistError{}
 }
 
-func (s MapCacheStorage) Set(key string, value string) error {
+func (s MapCacheStorage[K, V]) Set(key K, value V) error {
 	s[key] = value
 
 	return nil
 }
 
-func (s MapCacheStorage) TTL(key string) (int64, error) {
+func (s MapCacheStorage[K, V]) TTL(key K) (int64, error) {
 	_, ok := s[key]
 
 	if ok {
@@ -28,7 +28,7 @@ func (s MapCacheStorage) TTL(key string) (int64, error) {
 	return NOT_EXISTEN_KEY_TTL, nil
 }
 
-func (s MapCacheStorage) Del(key string) (bool, error) {
+func (s MapCacheStorage[K, V]) Del(key K) (bool, error) {
 	_, ok := s[key]
 
 	if ok {

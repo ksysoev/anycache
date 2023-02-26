@@ -6,15 +6,15 @@ import (
 )
 
 func TestMapCacheStorageGetSet(t *testing.T) {
-	storage := MapCacheStorage{}
+	storage := MapCacheStorage[string, string]{}
 
 	testKey := "testKey"
 	testValue := "testValue"
 
 	_, err := storage.Get(testKey)
 
-	if !errors.Is(err, KeyNotExistError{testKey}) {
-		t.Errorf("Expected to get error %v, but got '%v'", KeyNotExistError{testKey}, err)
+	if !errors.Is(err, KeyNotExistError{}) {
+		t.Errorf("Expected to get error %v, but got '%v'", KeyNotExistError{}, err)
 	}
 
 	err = storage.Set(testKey, testValue)

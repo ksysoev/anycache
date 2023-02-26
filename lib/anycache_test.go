@@ -7,7 +7,7 @@ import (
 )
 
 func TestCache(t *testing.T) {
-	cache := NewCache()
+	cache := NewCache[string, string]()
 
 	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil })
 
@@ -41,11 +41,11 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	cache := NewCache()
+	cache := NewCache[string, string]()
 
 	results := make(chan string)
 
-	go func(c *Cache, ch chan string) {
+	go func(c *Cache[string, string], ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue", nil
@@ -53,7 +53,7 @@ func TestCacheConcurrency(t *testing.T) {
 		ch <- val
 	}(&cache, results)
 
-	go func(c *Cache, ch chan string) {
+	go func(c *Cache[string, string], ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue1", nil

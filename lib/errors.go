@@ -1,5 +1,3 @@
 package anycache
 
-type KeyNotExistError struct {
-	key string
-}
+type KeyNotExistError struct{}
