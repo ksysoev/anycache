@@ -24,7 +24,8 @@ type Cache[K comparable, V any] struct {
 }
 
 type CacheItemOptions struct {
-	ttl time.Duration
+	ttl       time.Duration
+	warmUpTTL time.Duration
 }
 
 func NewCache[K comparable, V any]() Cache[K, V] {
@@ -39,7 +40,51 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	value, err := c.storage.Get(key)
 
 	if err == nil {
-		return value, nil
+		if options.warmUpTTL.Nanoseconds() == 0 {
+			return value, nil
+		}
+
+		hasTTL, ttl, err := c.storage.TTL(key)
+
+		if err != nil || !hasTTL {
+			// something went wrong, lets return already fetched value
+			// Also if key doesn't have TTL
+			return value, nil
+		}
+
+		if ttl.Nanoseconds() > options.warmUpTTL.Nanoseconds() {
+			//Not ready for warm up
+			return value, nil
+		}
+
+		c.globalLock.Lock()
+		l, ok := c.locks[key]
+		if !ok {
+			l = &(sync.Mutex{})
+			c.locks[key] = l
+		}
+		c.globalLock.Unlock()
+
+		isLocked := l.TryLock()
+
+		if !isLocked {
+			return value, nil
+		}
+
+		newValue, err := generator()
+
+		if err != nil {
+			return value, err
+		}
+
+		err = c.storage.Set(key, newValue, options)
+
+		if err != nil {
+			return value, err
+		}
+
+		return newValue, nil
+
 	}
 
 	if !errors.Is(err, KeyNotExistError{}) {

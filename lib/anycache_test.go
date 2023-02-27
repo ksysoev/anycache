@@ -71,3 +71,48 @@ func TestCacheConcurrency(t *testing.T) {
 		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
 	}
 }
+
+func TestCacheWarmingUp(t *testing.T) {
+	cache := NewCache[string, string]()
+	cacheOptions := CacheItemOptions{ttl: 2 * time.Millisecond, warmUpTTL: time.Millisecond}
+
+	val, _ := cache.Cache("testKey", func() (string, error) {
+		return "testValue", nil
+	}, cacheOptions)
+
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
+	}
+
+	results := make(chan string)
+
+	time.Sleep(time.Millisecond)
+
+	go func(c *Cache[string, string], ch chan string) {
+		val, _ := c.Cache("testKey", func() (string, error) {
+			time.Sleep(time.Millisecond)
+			return "newTestValue", nil
+		}, cacheOptions)
+		ch <- val
+	}(&cache, results)
+
+	go func(c *Cache[string, string], ch chan string) {
+		val, _ := c.Cache("testKey", func() (string, error) {
+			time.Sleep(time.Millisecond)
+			return "newTestValue", nil
+		}, cacheOptions)
+		ch <- val
+	}(&cache, results)
+
+	val1 := <-results
+	val2 := <-results
+
+	// First request
+	if val1 != "testValue" {
+		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
+	}
+
+	if val2 != "newTestValue" {
+		t.Errorf("Expected to get new value, but got '%v'", val2)
+	}
+}
