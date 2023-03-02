@@ -16,6 +16,7 @@ func NewMapCacheStorage[K comparable, V any]() MapCacheStorage[K, V] {
 	return MapCacheStorage[K, V]{}
 }
 
+// Get returns value for requested key
 func (s MapCacheStorage[K, V]) Get(key K) (V, error) {
 	var value V
 	item, ok := s[key]
@@ -38,6 +39,7 @@ func (s MapCacheStorage[K, V]) Get(key K) (V, error) {
 	return value, nil
 }
 
+// Set saves value into mape storage
 func (s MapCacheStorage[K, V]) Set(key K, value V, options CacheItemOptions) error {
 
 	if options.ttl.Nanoseconds() > 0 {
@@ -51,6 +53,7 @@ func (s MapCacheStorage[K, V]) Set(key K, value V, options CacheItemOptions) err
 	return nil
 }
 
+// TTL returns time to live for requested key
 func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
@@ -80,6 +83,7 @@ func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
 	return item.hasTTL, ttl, nil
 }
 
+// Del deletes key from map storage
 func (s MapCacheStorage[K, V]) Del(key K) (bool, error) {
 	_, ok := s[key]
 

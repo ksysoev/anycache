@@ -1,3 +1,4 @@
+// Package anycache provide laze caching with posibility to use diffent cache storages
 package anycache
 
 import (
@@ -11,23 +12,28 @@ const NO_EXPIRATION_KEY_TTL = -1
 
 const EMPTY_VALUE = ""
 
+// CacheStorage
 type CacheStorage[K comparable, V any] interface {
 	Get(K) (V, error)
 	Set(K, V, CacheItemOptions) error
 	TTL(K) (bool, time.Duration, error)
 	Del(K) (bool, error)
 }
+
+// Cache
 type Cache[K comparable, V any] struct {
 	storage    CacheStorage[K, V]
 	globalLock sync.Mutex
 	locks      map[K]*sync.Mutex
 }
 
+// CacheItemOptions
 type CacheItemOptions struct {
 	ttl       time.Duration
 	warmUpTTL time.Duration
 }
 
+// NewCache creates instance of Cache
 func NewCache[K comparable, V any]() Cache[K, V] {
 	return Cache[K, V]{
 		storage:    MapCacheStorage[K, V]{},
@@ -36,6 +42,9 @@ func NewCache[K comparable, V any]() Cache[K, V] {
 	}
 }
 
+// Cache trying to retrive value from cache if it exists.
+// If not it runs generator function to get the value and saves the value into cache storage
+// returns requested value
 func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
 	value, err := c.storage.Get(key)
 
