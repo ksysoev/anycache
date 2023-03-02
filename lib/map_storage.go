@@ -4,14 +4,17 @@ import (
 	"time"
 )
 
+// MapCacheStorage is a simple map based cache storage
 type MapCacheStorage[K comparable, V any] map[K]MapCacheStorageItem[V]
 
+// MapCacheStorageItem
 type MapCacheStorageItem[V any] struct {
 	value     V
 	hasTTL    bool
 	expiresAt time.Time
 }
 
+// NewMapCacheStorage creates instance of MapCacheStorage
 func NewMapCacheStorage[K comparable, V any]() MapCacheStorage[K, V] {
 	return MapCacheStorage[K, V]{}
 }
@@ -83,7 +86,7 @@ func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
 	return item.hasTTL, ttl, nil
 }
 
-// Del deletes key from map storage
+// Del deletes key from storage
 func (s MapCacheStorage[K, V]) Del(key K) (bool, error) {
 	_, ok := s[key]
 
