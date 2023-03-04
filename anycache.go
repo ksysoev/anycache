@@ -9,9 +9,6 @@ import (
 	"github.com/ksysoev/anycache/storage"
 )
 
-const NOT_EXISTEN_KEY_TTL = -2
-const NO_EXPIRATION_KEY_TTL = -1
-
 const EMPTY_VALUE = ""
 
 // CacheStorage
