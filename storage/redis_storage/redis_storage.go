@@ -2,6 +2,7 @@ package redis_storage
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ksysoev/anycache/storage"
@@ -20,6 +21,10 @@ func (s RedisCacheStorage) Get(key string) (string, error) {
 	var value string
 
 	item, err := s.redisDB.Get(context.Background(), key).Result()
+
+	if errors.Is(err, redis.Nil) {
+		return value, storage.KeyNotExistError{}
+	}
 
 	if err != nil {
 		return value, err
@@ -58,12 +63,19 @@ func (s RedisCacheStorage) TTL(key string) (bool, time.Duration, error) {
 		return hasTTL, ttl, err
 	}
 
-	if item.Nanoseconds() > 0 {
-		hasTTL = true
-		ttl = item
+	if item.Nanoseconds() >= 0 {
+		return true, item, nil
 	}
 
-	return hasTTL, ttl, nil
+	if item.Seconds() == -1 {
+		return false, item, nil
+	}
+
+	if item.Seconds() == -2 {
+		return false, item, storage.KeyNotExistError{}
+	}
+
+	panic("Unexpected TTL value returned from Redis" + item.String())
 }
 
 func (s RedisCacheStorage) Del(key string) (bool, error) {

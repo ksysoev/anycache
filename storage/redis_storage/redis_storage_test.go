@@ -1,6 +1,7 @@
 package redis_storage
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -24,6 +25,13 @@ func TestRedisCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", value)
 	}
 
+	mock.ExpectGet("testKey1").RedisNil()
+	value, err = redisStore.Get("testKey1")
+
+	if !errors.Is(err, storage.KeyNotExistError{}) {
+		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	}
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)
 	}
@@ -33,16 +41,23 @@ func TestRedisCacheStorageSet(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	mock.ExpectSet("testKey", "testValue", 0)
+	mock.ExpectSet("testKey", "testValue", 0).SetVal("OK")
 
-	redisStore.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
+	err := redisStore.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Error(err)
+	mock.ExpectSet("testKey1", "testValue", 1*time.Second).SetVal("OK")
+	err = redisStore.Set("testKey1", "testValue", storage.CacheStorageItemOptions{TTL: 1 * time.Second})
+
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("there were unfulfilled expectations: %s", err)
 	}
 }
 
@@ -64,6 +79,25 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 	if ttl.Milliseconds() != 1000 {
 		t.Errorf("Expected to get TTL as 1000 milisecond, but it has value %v microseconds", ttl.Milliseconds())
+	}
+
+	mock.ExpectTTL("testKey1").SetVal(-2 * time.Second)
+	hasTTL, ttl, err = redisStore.TTL("testKey1")
+
+	if !errors.Is(err, storage.KeyNotExistError{}) {
+		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	}
+
+	mock.ExpectTTL("testKey2").SetVal(-1 * time.Second)
+
+	hasTTL, ttl, err = redisStore.TTL("testKey2")
+
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
+	if hasTTL {
+		t.Errorf("Expected to have no TTL, but it has")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
