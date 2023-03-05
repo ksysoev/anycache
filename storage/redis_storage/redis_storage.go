@@ -9,10 +9,10 @@ import (
 )
 
 type RedisCacheStorage struct {
-	redisDB redis.Client
+	redisDB *redis.Client
 }
 
-func NewRedisCacheStorage(redisDB redis.Client) RedisCacheStorage {
+func NewRedisCacheStorage(redisDB *redis.Client) RedisCacheStorage {
 	return RedisCacheStorage{redisDB: redisDB}
 }
 
