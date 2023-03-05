@@ -10,11 +10,11 @@ import (
 
 func TestRedisCacheStorageGet(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
-	storage := NewRedisCacheStorage(redisClient)
+	redisStore := NewRedisCacheStorage(redisClient)
 
 	mock.ExpectGet("testKey").SetVal("testValue")
 
-	value, err := storage.Get("testKey")
+	value, err := redisStore.Get("testKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -31,11 +31,11 @@ func TestRedisCacheStorageGet(t *testing.T) {
 
 func TestRedisCacheStorageSet(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
-	storage := NewRedisCacheStorage(redisClient)
+	redisStore := NewRedisCacheStorage(redisClient)
 
 	mock.ExpectSet("testKey", "testValue", 0)
 
-	storage.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
+	redisStore.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
@@ -48,11 +48,11 @@ func TestRedisCacheStorageSet(t *testing.T) {
 
 func TestRedisCacheStorageTTL(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
-	storage := NewRedisCacheStorage(redisClient)
+	redisStore := NewRedisCacheStorage(redisClient)
 
 	mock.ExpectTTL("testKey").SetVal(1 * time.Second)
 
-	hasTTL, ttl, err := storage.TTL("testKey")
+	hasTTL, ttl, err := redisStore.TTL("testKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -62,8 +62,8 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to have TTL, but it doesnt")
 	}
 
-	if ttl.Microseconds() <= 0 || ttl.Microseconds() >= 1000 {
-		t.Errorf("Expected to have TTL less than start value, but it has value %v", ttl.Microseconds())
+	if ttl.Milliseconds() != 1000 {
+		t.Errorf("Expected to get TTL as 1000 milisecond, but it has value %v microseconds", ttl.Milliseconds())
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -73,11 +73,11 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 func TestRedisCacheStorageDel(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
-	storage := NewRedisCacheStorage(redisClient)
+	redisStore := NewRedisCacheStorage(redisClient)
 
 	mock.ExpectDel("testKey").SetVal(1)
 
-	storage.Del("testKey")
+	redisStore.Del("testKey")
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Error(err)
