@@ -79,6 +79,8 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 			return value, nil
 		}
 
+		defer l.Unlock()
+
 		newValue, err := generator()
 
 		if err != nil {
