@@ -4,10 +4,13 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/ksysoev/anycache/storage"
 )
 
 func TestCache(t *testing.T) {
-	cache := NewCache[string, string]()
+	cacheStore := storage.MapCacheStorage[string, string]{}
+	cache := NewCache[string, string](cacheStore)
 
 	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
 
@@ -41,7 +44,8 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	cache := NewCache[string, string]()
+	cacheStore := storage.MapCacheStorage[string, string]{}
+	cache := NewCache[string, string](cacheStore)
 
 	results := make(chan string)
 
@@ -73,7 +77,8 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	cache := NewCache[string, string]()
+	cacheStore := storage.MapCacheStorage[string, string]{}
+	cache := NewCache[string, string](cacheStore)
 	cacheOptions := CacheItemOptions{TTL: 2 * time.Millisecond, WarmUpTTL: time.Millisecond}
 
 	val, _ := cache.Cache("testKey", func() (string, error) {
