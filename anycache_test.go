@@ -192,25 +192,27 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 	mock.ExpectGet("testKey").RedisNil()
 	mock.ExpectGet("testKey").RedisNil()
 	mock.ExpectSet("testKey", "testValue", 0).SetVal("OK")
-
 	mock.ExpectGet("testKey").SetVal("testValue")
-
-	go func(c *Cache[string, string], ch chan string) {
+	ready := make(chan bool)
+	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+		ready <- true
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue", nil
 		}, CacheItemOptions{})
-		ch <- val
-	}(&cache, results)
 
-	time.Sleep(10 * time.Microsecond)
-	go func(c *Cache[string, string], ch chan string) {
+		ch <- val
+	}(&cache, results, ready)
+
+	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+		<-ready
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue1", nil
 		}, CacheItemOptions{})
+
 		ch <- val
-	}(&cache, results)
+	}(&cache, results, ready)
 
 	val1, val2 := <-results, <-results
 
@@ -240,22 +242,24 @@ func TestCacheWarmingUpRedisStorage(t *testing.T) {
 	mock.ExpectGet("testKey").SetVal("testValue")
 	mock.ExpectTTL("testKey").SetVal(time.Second)
 	mock.ExpectSet("testKey", "newTestValue", 3*time.Second).SetVal("OK")
-	go func(c *Cache[string, string], ch chan string) {
+	ready := make(chan bool)
+	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+		ready <- true
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(2 * time.Millisecond)
 			return "newTestValue", nil
 		}, cacheOptions)
 		ch <- val
-	}(&cache, results)
+	}(&cache, results, ready)
 
-	time.Sleep(10 * time.Microsecond)
-	go func(c *Cache[string, string], ch chan string) {
+	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+		<-ready
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(2 * time.Millisecond)
 			return "newTestValue", nil
 		}, cacheOptions)
 		ch <- val
-	}(&cache, results)
+	}(&cache, results, ready)
 
 	val1 := <-results
 	val2 := <-results

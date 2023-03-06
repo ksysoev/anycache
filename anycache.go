@@ -126,7 +126,6 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	}
 
 	newValue, err := generator()
-
 	if err != nil {
 		return value, err
 	}
