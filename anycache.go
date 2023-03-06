@@ -33,9 +33,9 @@ type CacheItemOptions struct {
 }
 
 // NewCache creates instance of Cache
-func NewCache[K comparable, V any]() Cache[K, V] {
+func NewCache[K comparable, V any](storage CacheStorage[K, V]) Cache[K, V] {
 	return Cache[K, V]{
-		storage:    storage.MapCacheStorage[K, V]{},
+		storage:    storage,
 		globalLock: sync.Mutex{},
 		locks:      map[K]*sync.Mutex{},
 	}

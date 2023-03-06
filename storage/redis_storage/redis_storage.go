@@ -13,10 +13,12 @@ type RedisCacheStorage struct {
 	redisDB *redis.Client
 }
 
+// NewRedisCacheStorage creates a new RedisCacheStorage
 func NewRedisCacheStorage(redisDB *redis.Client) RedisCacheStorage {
 	return RedisCacheStorage{redisDB: redisDB}
 }
 
+// Get returns a value from Redis by key
 func (s RedisCacheStorage) Get(key string) (string, error) {
 	var value string
 
@@ -34,6 +36,7 @@ func (s RedisCacheStorage) Get(key string) (string, error) {
 	return value, nil
 }
 
+// Set sets a value in Redis by key
 func (s RedisCacheStorage) Set(key string, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.redisDB.Set(context.Background(), key, value, options.TTL).Err()
@@ -54,6 +57,7 @@ func (s RedisCacheStorage) Set(key string, value string, options storage.CacheSt
 	return nil
 }
 
+// TTL returns a TTL of a key in Redis
 func (s RedisCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
@@ -78,6 +82,7 @@ func (s RedisCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	panic("Unexpected TTL value returned from Redis" + item.String())
 }
 
+// Del deletes a key from Redis
 func (s RedisCacheStorage) Del(key string) (bool, error) {
 	deleted, err := s.redisDB.Del(context.Background(), key).Result()
 
