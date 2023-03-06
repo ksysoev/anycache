@@ -3,7 +3,6 @@ package anycache
 
 import (
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -47,7 +46,7 @@ func NewCache[K comparable, V any](storage CacheStorage[K, V]) Cache[K, V] {
 // returns requested value
 func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
 	value, err := c.storage.Get(key)
-	fmt.Println("value", value, "err", err)
+
 	if err == nil {
 		if options.WarmUpTTL.Nanoseconds() == 0 {
 			return value, nil
@@ -103,7 +102,6 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	}
 
 	c.globalLock.Lock()
-	fmt.Println("global lock")
 	l, ok := c.locks[key]
 	if !ok {
 		l = &(sync.Mutex{})
@@ -118,7 +116,6 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	}()
 
 	value, err = c.storage.Get(key)
-	fmt.Println("value", value, "err", err)
 
 	if err == nil {
 		return value, nil
@@ -129,14 +126,12 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	}
 
 	newValue, err := generator()
-	fmt.Println("newValue", newValue, "err", err)
 
 	if err != nil {
 		return value, err
 	}
 
 	err = c.storage.Set(key, newValue, storage.CacheStorageItemOptions{TTL: options.TTL})
-	fmt.Println("Set err", err)
 
 	if err != nil {
 		return value, err
