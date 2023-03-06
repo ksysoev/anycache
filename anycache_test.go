@@ -203,8 +203,8 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 		ch <- val
 	}(&cache, results)
 
+	time.Sleep(10 * time.Microsecond)
 	go func(c *Cache[string, string], ch chan string) {
-		time.Sleep(500 * time.Microsecond)
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue1", nil
@@ -248,8 +248,8 @@ func TestCacheWarmingUpRedisStorage(t *testing.T) {
 		ch <- val
 	}(&cache, results)
 
+	time.Sleep(10 * time.Microsecond)
 	go func(c *Cache[string, string], ch chan string) {
-		time.Sleep(500 * time.Microsecond)
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(2 * time.Millisecond)
 			return "newTestValue", nil
