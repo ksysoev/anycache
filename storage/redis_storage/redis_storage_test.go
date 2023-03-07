@@ -26,7 +26,7 @@ func TestRedisCacheStorageGet(t *testing.T) {
 	}
 
 	mock.ExpectGet("testKey1").RedisNil()
-	value, err = redisStore.Get("testKey1")
+	_, err = redisStore.Get("testKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
@@ -78,11 +78,11 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 	}
 
 	if ttl.Milliseconds() != 1000 {
-		t.Errorf("Expected to get TTL as 1000 milisecond, but it has value %v microseconds", ttl.Milliseconds())
+		t.Errorf("Expected to get TTL as 1000 millisecond, but it has value %v microseconds", ttl.Milliseconds())
 	}
 
 	mock.ExpectTTL("testKey1").SetVal(-2 * time.Second)
-	hasTTL, ttl, err = redisStore.TTL("testKey1")
+	_, ttl, err = redisStore.TTL("testKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)

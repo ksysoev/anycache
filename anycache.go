@@ -73,20 +73,7 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 
 		defer c.releaseLock(key, l)
 
-		newValue, err := generator()
-
-		if err != nil {
-			return value, err
-		}
-
-		err = c.storage.Set(key, newValue, storage.CacheStorageItemOptions{TTL: options.TTL})
-
-		if err != nil {
-			return value, err
-		}
-
-		return newValue, nil
-
+		return c.generateAndSet(key, generator, options)
 	}
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
@@ -106,18 +93,7 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 		return value, err
 	}
 
-	newValue, err := generator()
-	if err != nil {
-		return value, err
-	}
-
-	err = c.storage.Set(key, newValue, storage.CacheStorageItemOptions{TTL: options.TTL})
-
-	if err != nil {
-		return value, err
-	}
-
-	return newValue, nil
+	return c.generateAndSet(key, generator, options)
 }
 
 func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
@@ -142,4 +118,20 @@ func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
 func (c *Cache[K, V]) releaseLock(key K, l *sync.Mutex) {
 	l.Unlock()
 	delete(c.locks, key)
+}
+
+func (c *Cache[K, V]) generateAndSet(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
+	value, err := generator()
+
+	if err != nil {
+		return value, err
+	}
+
+	err = c.storage.Set(key, value, storage.CacheStorageItemOptions{TTL: options.TTL})
+
+	if err != nil {
+		return value, err
+	}
+
+	return value, nil
 }
