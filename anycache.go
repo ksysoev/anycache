@@ -9,8 +9,6 @@ import (
 	"github.com/ksysoev/anycache/storage"
 )
 
-const EMPTY_VALUE = ""
-
 // CacheStorage
 type CacheStorage[K comparable, V any] interface {
 	Get(K) (V, error)
