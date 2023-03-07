@@ -65,21 +65,13 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 			return value, nil
 		}
 
-		c.globalLock.Lock()
-		l, ok := c.locks[key]
-		if !ok {
-			l = &(sync.Mutex{})
-			c.locks[key] = l
-		}
-		c.globalLock.Unlock()
-
-		isLocked := l.TryLock()
+		isLocked, l := c.acquireLock(key, false)
 
 		if !isLocked {
 			return value, nil
 		}
 
-		defer l.Unlock()
+		defer c.releaseLock(key, l)
 
 		newValue, err := generator()
 
@@ -101,19 +93,8 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 		return value, err
 	}
 
-	c.globalLock.Lock()
-	l, ok := c.locks[key]
-	if !ok {
-		l = &(sync.Mutex{})
-		c.locks[key] = l
-	}
-	c.globalLock.Unlock()
-
-	l.Lock()
-	defer func() {
-		l.Unlock()
-		delete(c.locks, key)
-	}()
+	_, l := c.acquireLock(key, true)
+	defer c.releaseLock(key, l)
 
 	value, err = c.storage.Get(key)
 
@@ -137,4 +118,28 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	}
 
 	return newValue, nil
+}
+
+func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
+	c.globalLock.Lock()
+	l, ok := c.locks[key]
+	if !ok {
+		l = &(sync.Mutex{})
+		c.locks[key] = l
+	}
+	c.globalLock.Unlock()
+
+	if wait {
+		l.Lock()
+		return true, l
+	}
+
+	isLocked := l.TryLock()
+
+	return isLocked, l
+}
+
+func (c *Cache[K, V]) releaseLock(key K, l *sync.Mutex) {
+	l.Unlock()
+	delete(c.locks, key)
 }
