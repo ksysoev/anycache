@@ -3,11 +3,14 @@ package anycache
 
 import (
 	"errors"
+	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/ksysoev/anycache/storage"
 )
+
+const persentOfRandomTTL = 10.0
 
 // CacheStorage
 type CacheStorage[K comparable, V any] interface {
@@ -19,9 +22,15 @@ type CacheStorage[K comparable, V any] interface {
 
 // Cache
 type Cache[K comparable, V any] struct {
-	storage    CacheStorage[K, V]
-	globalLock sync.Mutex
-	locks      map[K]*sync.Mutex
+	Storage      CacheStorage[K, V]
+	randomizeTTL bool
+	globalLock   sync.Mutex
+	locks        map[K]*sync.Mutex
+}
+
+// CacheOptions
+type CacheOptions struct {
+	randomizeTTL bool
 }
 
 // CacheItemOptions
@@ -31,11 +40,12 @@ type CacheItemOptions struct {
 }
 
 // NewCache creates instance of Cache
-func NewCache[K comparable, V any](storage CacheStorage[K, V]) Cache[K, V] {
+func NewCache[K comparable, V any](storage CacheStorage[K, V], options CacheOptions) Cache[K, V] {
 	return Cache[K, V]{
-		storage:    storage,
-		globalLock: sync.Mutex{},
-		locks:      map[K]*sync.Mutex{},
+		Storage:      storage,
+		randomizeTTL: options.randomizeTTL,
+		globalLock:   sync.Mutex{},
+		locks:        map[K]*sync.Mutex{},
 	}
 }
 
@@ -43,14 +53,14 @@ func NewCache[K comparable, V any](storage CacheStorage[K, V]) Cache[K, V] {
 // If not it runs generator function to get the value and saves the value into cache storage
 // returns requested value
 func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
-	value, err := c.storage.Get(key)
+	value, err := c.Storage.Get(key)
 
 	if err == nil {
 		if options.WarmUpTTL.Nanoseconds() == 0 {
 			return value, nil
 		}
 
-		hasTTL, ttl, err := c.storage.TTL(key)
+		hasTTL, ttl, err := c.Storage.TTL(key)
 
 		if err != nil || !hasTTL {
 			// something went wrong, lets return already fetched value
@@ -81,7 +91,7 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	_, l := c.acquireLock(key, true)
 	defer c.releaseLock(key, l)
 
-	value, err = c.storage.Get(key)
+	value, err = c.Storage.Get(key)
 
 	if err == nil {
 		return value, nil
@@ -125,11 +135,30 @@ func (c *Cache[K, V]) generateAndSet(key K, generator func() (V, error), options
 		return value, err
 	}
 
-	err = c.storage.Set(key, value, storage.CacheStorageItemOptions{TTL: options.TTL})
+	ttl := options.TTL
+
+	if c.randomizeTTL {
+		ttl = randomizeTTL(options.TTL)
+	}
+
+	err = c.Storage.Set(key, value, storage.CacheStorageItemOptions{TTL: ttl})
 
 	if err != nil {
 		return value, err
 	}
 
 	return value, nil
+}
+
+// randomizeTTL randomize TTL to avoid cache stampede
+func randomizeTTL(ttl time.Duration) time.Duration {
+	if ttl.Nanoseconds() == 0 {
+		return ttl
+	}
+
+	MaxShift := float64(ttl.Nanoseconds()) * persentOfRandomTTL / 100.0
+	randomizedShift := int64((MaxShift * (float64(rand.Intn(100)) - 50.0) / 100.0))
+
+	randomizedTTL := ttl.Nanoseconds() + randomizedShift
+	return time.Duration(randomizedTTL)
 }

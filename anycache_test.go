@@ -13,7 +13,7 @@ import (
 // Map storage tests
 func TestCache(t *testing.T) {
 	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 
 	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
 
@@ -48,7 +48,7 @@ func TestCache(t *testing.T) {
 
 func TestCacheConcurrency(t *testing.T) {
 	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 
 	results := make(chan string)
 
@@ -81,7 +81,7 @@ func TestCacheConcurrency(t *testing.T) {
 
 func TestCacheWarmingUp(t *testing.T) {
 	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 	cacheOptions := CacheItemOptions{TTL: 2 * time.Millisecond, WarmUpTTL: time.Millisecond}
 
 	val, _ := cache.Cache("testKey", func() (string, error) {
@@ -129,7 +129,7 @@ func TestCacheWarmingUp(t *testing.T) {
 func TestCacheRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 
 	mock.ExpectGet("testKey").RedisNil()
 	mock.ExpectGet("testKey").RedisNil()
@@ -184,7 +184,7 @@ func TestCacheRedisStorage(t *testing.T) {
 func TestCacheConcurrencyRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 
 	results := make(chan string)
 
@@ -232,7 +232,7 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 func TestCacheWarmingUpRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore)
+	cache := NewCache[string, string](cacheStore, CacheOptions{})
 	cacheOptions := CacheItemOptions{TTL: 3 * time.Second, WarmUpTTL: 2 * time.Second}
 
 	results := make(chan string)
