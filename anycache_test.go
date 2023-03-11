@@ -2,6 +2,7 @@ package anycache
 
 import (
 	"errors"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -275,5 +276,18 @@ func TestCacheWarmingUpRedisStorage(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("there were unfulfilled expectations: %s", err)
+	}
+}
+
+func TestRandomizeTTL(t *testing.T) {
+	rand.Seed(1)
+	ttl := randomizeTTL(100 * time.Second)
+
+	if ttl < 90*time.Second || ttl > 110*time.Second {
+		t.Errorf("Expected to get ttl between 90 and 110 seconds, but got %v", ttl)
+	}
+
+	if int(ttl.Seconds()) != 103 {
+		t.Errorf("Expected to get ttl equal to 103 seconds, but got %v", ttl)
 	}
 }
