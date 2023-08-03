@@ -104,6 +104,8 @@ func (c *Cache) Cache(key string, generator func() (string, error), options Cach
 	return c.generateAndSet(key, generator, options)
 }
 
+// acquireLock acquires a lock for the given key. If the lock is already held by another goroutine, it will either wait or return immediately depending on the value of the wait parameter.
+// Returns a boolean indicating whether the lock was acquired and a pointer to the lock.
 func (c *Cache) acquireLock(key string, wait bool) (bool, *sync.Mutex) {
 	c.globalLock.Lock()
 	l, ok := c.locks[key]
@@ -123,11 +125,16 @@ func (c *Cache) acquireLock(key string, wait bool) (bool, *sync.Mutex) {
 	return isLocked, l
 }
 
+// releaseLock releases the lock for the given key.
+// It unlocks the mutex and removes it from the locks map.
 func (c *Cache) releaseLock(key string, l *sync.Mutex) {
 	l.Unlock()
 	delete(c.locks, key)
 }
 
+// generateAndSet generates a value using the provided generator function,
+// sets it in the cache storage with the given key and options,
+// and returns the generated value and any error encountered.
 func (c *Cache) generateAndSet(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
 	value, err := generator()
 
@@ -150,7 +157,9 @@ func (c *Cache) generateAndSet(key string, generator func() (string, error), opt
 	return value, nil
 }
 
-// randomizeTTL randomize TTL to avoid cache stampede
+// randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
+// It takes a time.Duration as input and returns a time.Duration as output.
+// If the input duration is zero, it returns the same duration.
 func randomizeTTL(ttl time.Duration) time.Duration {
 	if ttl.Nanoseconds() == 0 {
 		return ttl
