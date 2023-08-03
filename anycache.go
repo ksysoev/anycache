@@ -24,7 +24,7 @@ type CacheStorage interface {
 type Cache struct {
 	Storage      CacheStorage
 	randomizeTTL bool
-	globalLock   sync.Mutex
+	globalLock   *sync.Mutex
 	locks        map[string]*sync.Mutex
 	requests     chan CacheReuest
 	responses    chan CacheResponse
@@ -56,14 +56,18 @@ type CacheItemOptions struct {
 
 // NewCache creates instance of Cache
 func NewCache(storage CacheStorage, options CacheOptions) Cache {
-	return Cache{
+	c := Cache{
 		Storage:      storage,
 		randomizeTTL: options.randomizeTTL,
-		globalLock:   sync.Mutex{},
+		globalLock:   &sync.Mutex{},
 		locks:        map[string]*sync.Mutex{},
 		requests:     make(chan CacheReuest),
 		responses:    make(chan CacheResponse),
 	}
+
+	go c.requestHandler()
+
+	return c
 }
 
 // Cache trying to retrive value from cache if it exists.
@@ -166,8 +170,6 @@ func (c *Cache) requestHandler() {
 				c.responses <- cacheResp
 
 			}(req.key, req.generator, req.options)
-
-			continue
 
 		case resp := <-c.responses:
 
