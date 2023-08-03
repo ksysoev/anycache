@@ -26,6 +26,21 @@ type Cache struct {
 	randomizeTTL bool
 	globalLock   sync.Mutex
 	locks        map[string]*sync.Mutex
+	requests     chan CacheReuest
+	responses    chan CacheResponse
+}
+
+type CacheReuest struct {
+	key       string
+	generator func() (string, error)
+	options   CacheItemOptions
+	response  chan CacheResponse
+}
+
+type CacheResponse struct {
+	key   string
+	value string
+	err   error
 }
 
 // CacheOptions
@@ -46,6 +61,8 @@ func NewCache(storage CacheStorage, options CacheOptions) Cache {
 		randomizeTTL: options.randomizeTTL,
 		globalLock:   sync.Mutex{},
 		locks:        map[string]*sync.Mutex{},
+		requests:     make(chan CacheReuest),
+		responses:    make(chan CacheResponse),
 	}
 }
 
@@ -102,6 +119,71 @@ func (c *Cache) Cache(key string, generator func() (string, error), options Cach
 	}
 
 	return c.generateAndSet(key, generator, options)
+}
+
+func (c *Cache) CacheAsync(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
+	response := make(chan CacheResponse)
+
+	c.requests <- CacheReuest{
+		key:       key,
+		generator: generator,
+		options:   options,
+		response:  response,
+	}
+
+	resp := <-response
+
+	return resp.value, resp.err
+}
+
+func (c *Cache) requestHandler() {
+	requestStorage := map[string][]CacheReuest{}
+
+	for {
+		select {
+		case req := <-c.requests:
+			reqQ, ok := requestStorage[req.key]
+
+			if ok {
+				requestStorage[req.key] = append(reqQ, req)
+				continue
+			}
+
+			requestStorage[req.key] = []CacheReuest{req}
+			go func(key string, generator func() (string, error), options CacheItemOptions) {
+				value, err := c.Storage.Get(key)
+
+				if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+					value, err = c.generateAndSet(key, generator, options)
+				}
+
+				cacheResp := CacheResponse{
+					key:   key,
+					value: value,
+					err:   err,
+				}
+
+				c.responses <- cacheResp
+
+			}(req.key, req.generator, req.options)
+
+			continue
+
+		case resp := <-c.responses:
+
+			reqQ, ok := requestStorage[resp.key]
+
+			if !ok {
+				continue
+			}
+
+			for _, req := range reqQ {
+				req.response <- resp
+			}
+
+			delete(requestStorage, resp.key)
+		}
+	}
 }
 
 // acquireLock acquires a lock for the given key. If the lock is already held by another goroutine, it will either wait or return immediately depending on the value of the wait parameter.
