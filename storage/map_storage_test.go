@@ -7,7 +7,7 @@ import (
 )
 
 func TestMapCacheStorageGetSet(t *testing.T) {
-	storage := MapCacheStorage[string, string]{}
+	storage := MapCacheStorage{}
 
 	testKey := "testKey"
 	testValue := "testValue"
@@ -38,7 +38,7 @@ func TestMapCacheStorageTTL(t *testing.T) {
 	testKey := "testKey"
 	testValue := "testValue"
 
-	storage := MapCacheStorage[string, string]{}
+	storage := MapCacheStorage{}
 
 	err := storage.Set(testKey, testValue, CacheStorageItemOptions{TTL: time.Millisecond})
 
@@ -94,7 +94,7 @@ func TestMapCacheStorageDel(t *testing.T) {
 	testKey := "testKey"
 	testValue := "testValue"
 
-	storage := MapCacheStorage[string, string]{}
+	storage := MapCacheStorage{}
 
 	err := storage.Set(testKey, testValue, CacheStorageItemOptions{})
 

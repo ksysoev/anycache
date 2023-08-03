@@ -13,8 +13,8 @@ import (
 
 // Map storage tests
 func TestCache(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cacheStore := storage.NewMapCacheStorage()
+	cache := NewCache(cacheStore, CacheOptions{})
 
 	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
 
@@ -48,12 +48,12 @@ func TestCache(t *testing.T) {
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cacheStore := storage.NewMapCacheStorage()
+	cache := NewCache(cacheStore, CacheOptions{})
 
 	results := make(chan string)
 
-	go func(c *Cache[string, string], ch chan string) {
+	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue", nil
@@ -61,7 +61,7 @@ func TestCacheConcurrency(t *testing.T) {
 		ch <- val
 	}(&cache, results)
 
-	go func(c *Cache[string, string], ch chan string) {
+	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "testValue1", nil
@@ -81,8 +81,8 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage[string, string]()
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cacheStore := storage.NewMapCacheStorage()
+	cache := NewCache(cacheStore, CacheOptions{})
 	cacheOptions := CacheItemOptions{TTL: 2 * time.Millisecond, WarmUpTTL: time.Millisecond}
 
 	val, _ := cache.Cache("testKey", func() (string, error) {
@@ -97,7 +97,7 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	time.Sleep(time.Millisecond)
 
-	go func(c *Cache[string, string], ch chan string) {
+	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "newTestValue", nil
@@ -105,7 +105,7 @@ func TestCacheWarmingUp(t *testing.T) {
 		ch <- val
 	}(&cache, results)
 
-	go func(c *Cache[string, string], ch chan string) {
+	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
 			return "newTestValue", nil
@@ -130,7 +130,7 @@ func TestCacheWarmingUp(t *testing.T) {
 func TestCacheRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cache := NewCache(cacheStore, CacheOptions{})
 
 	mock.ExpectGet("testKey").RedisNil()
 	mock.ExpectGet("testKey").RedisNil()
@@ -185,7 +185,7 @@ func TestCacheRedisStorage(t *testing.T) {
 func TestCacheConcurrencyRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cache := NewCache(cacheStore, CacheOptions{})
 
 	results := make(chan string)
 
@@ -195,7 +195,7 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 	mock.ExpectSet("testKey", "testValue", 0).SetVal("OK")
 	mock.ExpectGet("testKey").SetVal("testValue")
 	ready := make(chan bool)
-	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+	go func(c *Cache, ch chan string, ready chan bool) {
 		ready <- true
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
@@ -205,7 +205,7 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 		ch <- val
 	}(&cache, results, ready)
 
-	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+	go func(c *Cache, ch chan string, ready chan bool) {
 		<-ready
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond)
@@ -233,7 +233,7 @@ func TestCacheConcurrencyRedisStorage(t *testing.T) {
 func TestCacheWarmingUpRedisStorage(t *testing.T) {
 	redisClient, mock := redismock.NewClientMock()
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache[string, string](cacheStore, CacheOptions{})
+	cache := NewCache(cacheStore, CacheOptions{})
 	cacheOptions := CacheItemOptions{TTL: 3 * time.Second, WarmUpTTL: 2 * time.Second}
 
 	results := make(chan string)
@@ -244,7 +244,7 @@ func TestCacheWarmingUpRedisStorage(t *testing.T) {
 	mock.ExpectTTL("testKey").SetVal(time.Second)
 	mock.ExpectSet("testKey", "newTestValue", 3*time.Second).SetVal("OK")
 	ready := make(chan bool)
-	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+	go func(c *Cache, ch chan string, ready chan bool) {
 		ready <- true
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(2 * time.Millisecond)
@@ -253,7 +253,7 @@ func TestCacheWarmingUpRedisStorage(t *testing.T) {
 		ch <- val
 	}(&cache, results, ready)
 
-	go func(c *Cache[string, string], ch chan string, ready chan bool) {
+	go func(c *Cache, ch chan string, ready chan bool) {
 		<-ready
 		val, _ := c.Cache("testKey", func() (string, error) {
 			time.Sleep(2 * time.Millisecond)

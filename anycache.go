@@ -13,19 +13,19 @@ import (
 const persentOfRandomTTL = 10.0
 
 // CacheStorage
-type CacheStorage[K comparable, V any] interface {
-	Get(K) (V, error)
-	Set(K, V, storage.CacheStorageItemOptions) error
-	TTL(K) (bool, time.Duration, error)
-	Del(K) (bool, error)
+type CacheStorage interface {
+	Get(string) (string, error)
+	Set(string, string, storage.CacheStorageItemOptions) error
+	TTL(string) (bool, time.Duration, error)
+	Del(string) (bool, error)
 }
 
 // Cache
-type Cache[K comparable, V any] struct {
-	Storage      CacheStorage[K, V]
+type Cache struct {
+	Storage      CacheStorage
 	randomizeTTL bool
 	globalLock   sync.Mutex
-	locks        map[K]*sync.Mutex
+	locks        map[string]*sync.Mutex
 }
 
 // CacheOptions
@@ -40,19 +40,19 @@ type CacheItemOptions struct {
 }
 
 // NewCache creates instance of Cache
-func NewCache[K comparable, V any](storage CacheStorage[K, V], options CacheOptions) Cache[K, V] {
-	return Cache[K, V]{
+func NewCache(storage CacheStorage, options CacheOptions) Cache {
+	return Cache{
 		Storage:      storage,
 		randomizeTTL: options.randomizeTTL,
 		globalLock:   sync.Mutex{},
-		locks:        map[K]*sync.Mutex{},
+		locks:        map[string]*sync.Mutex{},
 	}
 }
 
 // Cache trying to retrive value from cache if it exists.
 // If not it runs generator function to get the value and saves the value into cache storage
 // returns requested value
-func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
+func (c *Cache) Cache(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
 	value, err := c.Storage.Get(key)
 
 	if err == nil {
@@ -104,7 +104,7 @@ func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheIte
 	return c.generateAndSet(key, generator, options)
 }
 
-func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
+func (c *Cache) acquireLock(key string, wait bool) (bool, *sync.Mutex) {
 	c.globalLock.Lock()
 	l, ok := c.locks[key]
 	if !ok {
@@ -123,12 +123,12 @@ func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
 	return isLocked, l
 }
 
-func (c *Cache[K, V]) releaseLock(key K, l *sync.Mutex) {
+func (c *Cache) releaseLock(key string, l *sync.Mutex) {
 	l.Unlock()
 	delete(c.locks, key)
 }
 
-func (c *Cache[K, V]) generateAndSet(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
+func (c *Cache) generateAndSet(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
 	value, err := generator()
 
 	if err != nil {
