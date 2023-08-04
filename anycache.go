@@ -4,7 +4,6 @@ package anycache
 import (
 	"errors"
 	"math/rand"
-	"sync"
 	"time"
 
 	"github.com/ksysoev/anycache/storage"
@@ -13,19 +12,33 @@ import (
 const persentOfRandomTTL = 10.0
 
 // CacheStorage
-type CacheStorage[K comparable, V any] interface {
-	Get(K) (V, error)
-	Set(K, V, storage.CacheStorageItemOptions) error
-	TTL(K) (bool, time.Duration, error)
-	Del(K) (bool, error)
+type CacheStorage interface {
+	Get(string) (string, error)
+	Set(string, string, storage.CacheStorageItemOptions) error
+	TTL(string) (bool, time.Duration, error)
+	Del(string) (bool, error)
 }
 
 // Cache
-type Cache[K comparable, V any] struct {
-	Storage      CacheStorage[K, V]
+type Cache struct {
+	Storage      CacheStorage
 	randomizeTTL bool
-	globalLock   sync.Mutex
-	locks        map[K]*sync.Mutex
+	requests     chan CacheReuest
+	responses    chan CacheResponse
+}
+
+type CacheReuest struct {
+	key       string
+	generator func() (string, error)
+	options   CacheItemOptions
+	response  chan CacheResponse
+}
+
+type CacheResponse struct {
+	key       string
+	value     string
+	err       error
+	warmingUp bool
 }
 
 // CacheOptions
@@ -39,96 +52,164 @@ type CacheItemOptions struct {
 	WarmUpTTL time.Duration
 }
 
+type CacheQueue struct {
+	requests     []CacheReuest
+	WarmingUp    bool
+	currentValue string
+}
+
 // NewCache creates instance of Cache
-func NewCache[K comparable, V any](storage CacheStorage[K, V], options CacheOptions) Cache[K, V] {
-	return Cache[K, V]{
+func NewCache(storage CacheStorage, options CacheOptions) Cache {
+	c := Cache{
 		Storage:      storage,
 		randomizeTTL: options.randomizeTTL,
-		globalLock:   sync.Mutex{},
-		locks:        map[K]*sync.Mutex{},
+		requests:     make(chan CacheReuest),
+		responses:    make(chan CacheResponse),
+	}
+
+	go c.requestHandler()
+
+	return c
+}
+
+func (c *Cache) Cache(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
+	response := make(chan CacheResponse)
+
+	c.requests <- CacheReuest{
+		key:       key,
+		generator: generator,
+		options:   options,
+		response:  response,
+	}
+
+	resp := <-response
+
+	return resp.value, resp.err
+}
+
+func (c *Cache) requestHandler() {
+	requestStorage := map[string]CacheQueue{}
+
+	for {
+		select {
+		case req := <-c.requests:
+			reqQ, ok := requestStorage[req.key]
+
+			if ok {
+				if reqQ.WarmingUp {
+					req.response <- CacheResponse{
+						key:   req.key,
+						value: reqQ.currentValue,
+						err:   nil,
+					}
+					continue
+				}
+				reqQ.requests = append(reqQ.requests, req)
+				requestStorage[req.key] = reqQ
+				continue
+			}
+
+			requestStorage[req.key] = CacheQueue{requests: []CacheReuest{req}}
+			go func(key string, generator func() (string, error), options CacheItemOptions) {
+				var value string
+				var err error
+				var needWarmUp bool
+				if options.WarmUpTTL.Nanoseconds() > 0 {
+					var ttl time.Duration
+					value, ttl, err = c.GetWithTTL(key)
+
+					readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= options.WarmUpTTL.Nanoseconds()
+					if err == nil && readyForWarmUp {
+						needWarmUp = true
+					}
+				} else {
+					value, err = c.Storage.Get(key)
+				}
+
+				if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+					value, err = c.generateAndSet(key, generator, options)
+				}
+
+				cacheResp := CacheResponse{
+					key:       key,
+					value:     value,
+					err:       err,
+					warmingUp: needWarmUp,
+				}
+
+				c.responses <- cacheResp
+
+				if needWarmUp {
+					newVal, err := c.generateAndSet(key, generator, options)
+
+					cacheResp := CacheResponse{
+						key:       key,
+						value:     newVal,
+						err:       err,
+						warmingUp: false,
+					}
+
+					c.responses <- cacheResp
+				}
+
+			}(req.key, req.generator, req.options)
+
+		case resp := <-c.responses:
+
+			reqQ, ok := requestStorage[resp.key]
+
+			if !ok {
+				continue
+			}
+
+			if resp.warmingUp {
+				reqQ.currentValue = resp.value
+				reqQ.WarmingUp = true
+				processNow := reqQ.requests[1:]
+				reqQ.requests = reqQ.requests[:1]
+				requestStorage[resp.key] = reqQ
+
+				for _, req := range processNow {
+					req.response <- resp
+				}
+
+				continue
+
+			}
+
+			for _, req := range reqQ.requests {
+				req.response <- resp
+			}
+
+			delete(requestStorage, resp.key)
+		}
 	}
 }
 
-// Cache trying to retrive value from cache if it exists.
-// If not it runs generator function to get the value and saves the value into cache storage
-// returns requested value
-func (c *Cache[K, V]) Cache(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
+func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
 	value, err := c.Storage.Get(key)
 
-	if err == nil {
-		if options.WarmUpTTL.Nanoseconds() == 0 {
-			return value, nil
-		}
-
-		hasTTL, ttl, err := c.Storage.TTL(key)
-
-		if err != nil || !hasTTL {
-			// something went wrong, lets return already fetched value
-			// Also if key doesn't have TTL
-			return value, nil
-		}
-
-		if ttl.Nanoseconds() > options.WarmUpTTL.Nanoseconds() {
-			//Not ready for warm up
-			return value, nil
-		}
-
-		isLocked, l := c.acquireLock(key, false)
-
-		if !isLocked {
-			return value, nil
-		}
-
-		defer c.releaseLock(key, l)
-
-		return c.generateAndSet(key, generator, options)
+	if err != nil {
+		return value, 0, err
 	}
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		return value, err
+	hasTTL, ttl, err := c.Storage.TTL(key)
+
+	if err != nil {
+		return value, 0, err
 	}
 
-	_, l := c.acquireLock(key, true)
-	defer c.releaseLock(key, l)
-
-	value, err = c.Storage.Get(key)
-
-	if err == nil {
-		return value, nil
+	if !hasTTL {
+		return value, 0, nil
 	}
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		return value, err
-	}
-
-	return c.generateAndSet(key, generator, options)
+	return value, ttl, nil
 }
 
-func (c *Cache[K, V]) acquireLock(key K, wait bool) (bool, *sync.Mutex) {
-	c.globalLock.Lock()
-	l, ok := c.locks[key]
-	if !ok {
-		l = &(sync.Mutex{})
-		c.locks[key] = l
-	}
-	c.globalLock.Unlock()
-
-	if wait {
-		l.Lock()
-		return true, l
-	}
-
-	isLocked := l.TryLock()
-
-	return isLocked, l
-}
-
-func (c *Cache[K, V]) releaseLock(key K, l *sync.Mutex) {
-	l.Unlock()
-	delete(c.locks, key)
-}
-
-func (c *Cache[K, V]) generateAndSet(key K, generator func() (V, error), options CacheItemOptions) (V, error) {
+// generateAndSet generates a value using the provided generator function,
+// sets it in the cache storage with the given key and options,
+// and returns the generated value and any error encountered.
+func (c *Cache) generateAndSet(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
 	value, err := generator()
 
 	if err != nil {
@@ -150,7 +231,9 @@ func (c *Cache[K, V]) generateAndSet(key K, generator func() (V, error), options
 	return value, nil
 }
 
-// randomizeTTL randomize TTL to avoid cache stampede
+// randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
+// It takes a time.Duration as input and returns a time.Duration as output.
+// If the input duration is zero, it returns the same duration.
 func randomizeTTL(ttl time.Duration) time.Duration {
 	if ttl.Nanoseconds() == 0 {
 		return ttl

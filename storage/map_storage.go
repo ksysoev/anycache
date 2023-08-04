@@ -9,23 +9,23 @@ type CacheStorageItemOptions struct {
 }
 
 // MapCacheStorage is a simple map based cache storage
-type MapCacheStorage[K comparable, V any] map[K]MapCacheStorageItem[V]
+type MapCacheStorage map[string]MapCacheStorageItem
 
 // MapCacheStorageItem
-type MapCacheStorageItem[V any] struct {
-	value     V
+type MapCacheStorageItem struct {
+	value     string
 	hasTTL    bool
 	expiresAt time.Time
 }
 
 // NewMapCacheStorage creates instance of MapCacheStorage
-func NewMapCacheStorage[K comparable, V any]() MapCacheStorage[K, V] {
-	return MapCacheStorage[K, V]{}
+func NewMapCacheStorage() MapCacheStorage {
+	return MapCacheStorage{}
 }
 
 // Get returns value for requested key
-func (s MapCacheStorage[K, V]) Get(key K) (V, error) {
-	var value V
+func (s MapCacheStorage) Get(key string) (string, error) {
+	var value string
 	item, ok := s[key]
 
 	if !ok {
@@ -47,21 +47,21 @@ func (s MapCacheStorage[K, V]) Get(key K) (V, error) {
 }
 
 // Set saves value into mape storage
-func (s MapCacheStorage[K, V]) Set(key K, value V, options CacheStorageItemOptions) error {
+func (s MapCacheStorage) Set(key string, value string, options CacheStorageItemOptions) error {
 
 	if options.TTL.Nanoseconds() > 0 {
 		expiresAt := time.Now().Add(options.TTL)
-		s[key] = MapCacheStorageItem[V]{value: value, expiresAt: expiresAt, hasTTL: true}
+		s[key] = MapCacheStorageItem{value: value, expiresAt: expiresAt, hasTTL: true}
 		return nil
 	}
 
-	s[key] = MapCacheStorageItem[V]{value: value, hasTTL: false}
+	s[key] = MapCacheStorageItem{value: value, hasTTL: false}
 
 	return nil
 }
 
 // TTL returns time to live for requested key
-func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
+func (s MapCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
 
@@ -91,7 +91,7 @@ func (s MapCacheStorage[K, V]) TTL(key K) (bool, time.Duration, error) {
 }
 
 // Del deletes key from storage
-func (s MapCacheStorage[K, V]) Del(key K) (bool, error) {
+func (s MapCacheStorage) Del(key string) (bool, error) {
 	_, ok := s[key]
 
 	if ok {
