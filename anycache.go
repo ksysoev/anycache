@@ -110,49 +110,7 @@ func (c *Cache) requestHandler() {
 			}
 
 			requestStorage[req.key] = CacheQueue{requests: []CacheReuest{req}}
-			go func(key string, generator func() (string, error), options CacheItemOptions) {
-				var value string
-				var err error
-				var needWarmUp bool
-				if options.WarmUpTTL.Nanoseconds() > 0 {
-					var ttl time.Duration
-					value, ttl, err = c.GetWithTTL(key)
-
-					readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= options.WarmUpTTL.Nanoseconds()
-					if err == nil && readyForWarmUp {
-						needWarmUp = true
-					}
-				} else {
-					value, err = c.Storage.Get(key)
-				}
-
-				if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
-					value, err = c.generateAndSet(key, generator, options)
-				}
-
-				cacheResp := CacheResponse{
-					key:       key,
-					value:     value,
-					err:       err,
-					warmingUp: needWarmUp,
-				}
-
-				c.responses <- cacheResp
-
-				if needWarmUp {
-					newVal, err := c.generateAndSet(key, generator, options)
-
-					cacheResp := CacheResponse{
-						key:       key,
-						value:     newVal,
-						err:       err,
-						warmingUp: false,
-					}
-
-					c.responses <- cacheResp
-				}
-
-			}(req.key, req.generator, req.options)
+			go c.processRequest(req.key, req.generator, req.options)
 
 		case resp := <-c.responses:
 
@@ -183,6 +141,56 @@ func (c *Cache) requestHandler() {
 
 			delete(requestStorage, resp.key)
 		}
+	}
+}
+
+// processRequest processes a cache request with the given key, generator function, and options.
+// If the cache storage has a value for the key, it returns the value and any error encountered.
+// If the cache storage does not have a value for the key, it generates a value using the provided generator function,
+// sets it in the cache storage with the given key and options, and returns the generated value and any error encountered.
+// If the cache item options include a warm-up TTL, it checks if the current TTL of the key is less than or equal to the warm-up TTL.
+// If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
+// and returns the new value and any error encountered.
+func (c *Cache) processRequest(key string, generator func() (string, error), options CacheItemOptions) {
+	var value string
+	var err error
+	var needWarmUp bool
+	if options.WarmUpTTL.Nanoseconds() > 0 {
+		var ttl time.Duration
+		value, ttl, err = c.GetWithTTL(key)
+
+		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= options.WarmUpTTL.Nanoseconds()
+		if err == nil && readyForWarmUp {
+			needWarmUp = true
+		}
+	} else {
+		value, err = c.Storage.Get(key)
+	}
+
+	if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+		value, err = c.generateAndSet(key, generator, options)
+	}
+
+	cacheResp := CacheResponse{
+		key:       key,
+		value:     value,
+		err:       err,
+		warmingUp: needWarmUp,
+	}
+
+	c.responses <- cacheResp
+
+	if needWarmUp {
+		newVal, err := c.generateAndSet(key, generator, options)
+
+		cacheResp := CacheResponse{
+			key:       key,
+			value:     newVal,
+			err:       err,
+			warmingUp: false,
+		}
+
+		c.responses <- cacheResp
 	}
 }
 
