@@ -2,6 +2,7 @@
 package anycache
 
 import (
+	"encoding/json"
 	"errors"
 	"math/rand"
 	"time"
@@ -83,8 +84,37 @@ func (c *Cache) Cache(key string, generator func() (string, error), options Cach
 	}
 
 	resp := <-response
+	close(response)
 
 	return resp.value, resp.err
+}
+
+func (c *Cache) CacheJSON(key string, generator func() (any, error), result any, options CacheItemOptions) error {
+	generatorWrapper := func() (string, error) {
+		val, err := generator()
+
+		if err != nil {
+			return "", err
+		}
+
+		jsonVal, err := json.Marshal(val)
+
+		if err != nil {
+			return "", err
+		}
+
+		return string(jsonVal), nil
+	}
+
+	val, err := c.Cache(key, generatorWrapper, options)
+
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal([]byte(val), result)
+
+	return err
 }
 
 func (c *Cache) requestHandler() {

@@ -136,3 +136,53 @@ func TestRandomizeTTL(t *testing.T) {
 		t.Errorf("Expected to get ttl equal to 103 seconds, but got %v", ttl)
 	}
 }
+
+func TestCacheJSON(t *testing.T) {
+	// Create a new cache instance
+	cacheStore := storage.NewMapCacheStorage()
+	cache := NewCache(cacheStore, CacheOptions{})
+
+	// Define a test key and value
+	key := "test"
+	value := map[string]string{
+		"foo": "bar",
+		"baz": "qux",
+	}
+
+	// Define a generator function that returns the test value
+	generator := func() (any, error) {
+		return value, nil
+	}
+
+	// Define a result variable to hold the unmarshalled JSON value
+	var result map[string]string
+
+	// Call the CacheJSON function to cache the test value
+	err := cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+
+	// Check that the function returned no errors
+	if err != nil {
+		t.Errorf("CacheJSON returned an error: %v", err)
+	}
+
+	// Check that the result variable contains the expected value
+	if result["foo"] != "bar" || result["baz"] != "qux" {
+		t.Errorf("CacheJSON returned an unexpected value: %v", result)
+	}
+
+	// Wait for the cache item to expire
+	time.Sleep(time.Second * 11)
+
+	// Call the CacheJSON function again to regenerate the value
+	err = cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+
+	// Check that the function returned no errors
+	if err != nil {
+		t.Errorf("CacheJSON returned an error: %v", err)
+	}
+
+	// Check that the result variable contains the expected value
+	if result["foo"] != "bar" || result["baz"] != "qux" {
+		t.Errorf("CacheJSON returned an unexpected value: %v", result)
+	}
+}
