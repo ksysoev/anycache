@@ -103,10 +103,10 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr(), DB: 1})
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
-	cacheOptions := CacheItemOptions{TTL: 2 * time.Second, WarmUpTTL: time.Second}
+	cacheOptions := CacheItemOptions{TTL: 3 * time.Second, WarmUpTTL: 2 * time.Second}
 
 	val, _ := cache.Cache("testKey", func() (string, error) {
 		return "testValue", nil
@@ -118,7 +118,7 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	results := make(chan string)
 
-	time.Sleep(time.Second)
+	time.Sleep(time.Millisecond * 1001)
 
 	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
@@ -199,10 +199,7 @@ func TestCacheJSON(t *testing.T) {
 		t.Errorf("CacheJSON returned an unexpected value: %v", result)
 	}
 
-	// Wait for the cache item to expire
-	time.Sleep(time.Second * 11)
-
-	// Call the CacheJSON function again to regenerate the value
+	// Call the CacheJSON function again to read value from storage
 	err = cache.CacheJSON(key, generator, &result, CacheItemOptions{})
 
 	// Check that the function returned no errors

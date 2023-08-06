@@ -61,7 +61,7 @@ func (s RedisCacheStorage) Set(key string, value string, options storage.CacheSt
 func (s RedisCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
-	item, err := s.redisDB.TTL(context.Background(), key).Result()
+	item, err := s.redisDB.PTTL(context.Background(), key).Result()
 
 	if err != nil {
 		return hasTTL, ttl, err
