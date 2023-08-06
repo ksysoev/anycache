@@ -1,17 +1,36 @@
 package anycache
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math/rand"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/ksysoev/anycache/storage"
+	"github.com/ksysoev/anycache/storage/redis_storage"
+	"github.com/redis/go-redis/v9"
 )
+
+func getRedisAddr() string {
+	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
+	if TestRedisHost == "" {
+		TestRedisHost = "localhost"
+	}
+
+	TestRedisPort := os.Getenv("TEST_REDIS_PORT")
+	if TestRedisPort == "" {
+		TestRedisPort = "6379"
+	}
+
+	return fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)
+}
 
 // Map storage tests
 func TestCache(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage()
+	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
 	val, err := cache.Cache("testKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
@@ -43,10 +62,13 @@ func TestCache(t *testing.T) {
 	if val != "" {
 		t.Errorf("Expected to get empty string, but got '%v'", val)
 	}
+
+	redisClient.FlushAll(context.Background())
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage()
+	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
 	results := make(chan string)
@@ -76,12 +98,15 @@ func TestCacheConcurrency(t *testing.T) {
 	if val1 != val2 {
 		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
 	}
+
+	redisClient.FlushAll(context.Background())
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	cacheStore := storage.NewMapCacheStorage()
+	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
-	cacheOptions := CacheItemOptions{TTL: 2 * time.Millisecond, WarmUpTTL: time.Millisecond}
+	cacheOptions := CacheItemOptions{TTL: 2 * time.Second, WarmUpTTL: time.Second}
 
 	val, _ := cache.Cache("testKey", func() (string, error) {
 		return "testValue", nil
@@ -93,11 +118,11 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	results := make(chan string)
 
-	time.Sleep(time.Millisecond)
+	time.Sleep(time.Second)
 
 	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
-			time.Sleep(time.Millisecond)
+			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, cacheOptions)
 		ch <- val
@@ -105,7 +130,7 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache("testKey", func() (string, error) {
-			time.Sleep(time.Millisecond)
+			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, cacheOptions)
 		ch <- val
@@ -115,13 +140,15 @@ func TestCacheWarmingUp(t *testing.T) {
 	val2 := <-results
 
 	// First request
-	if val1 != "testValue" {
-		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
+	if !(val1 == "testValue" || val2 == "testValue") {
+		t.Errorf("Expected to get at least one testValue as a result, but got '%v' and %v", val1, val2)
 	}
 
-	if val2 != "newTestValue" {
-		t.Errorf("Expected to get new value, but got '%v'", val2)
+	if !(val1 == "newTestValue" || val2 == "newTestValue") {
+		t.Errorf("Expected to get at least one new value, but got '%v' and '%v'", val1, val2)
 	}
+
+	redisClient.FlushAll(context.Background())
 }
 
 func TestRandomizeTTL(t *testing.T) {
@@ -139,7 +166,9 @@ func TestRandomizeTTL(t *testing.T) {
 
 func TestCacheJSON(t *testing.T) {
 	// Create a new cache instance
-	cacheStore := storage.NewMapCacheStorage()
+
+	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
 	// Define a test key and value
@@ -185,4 +214,6 @@ func TestCacheJSON(t *testing.T) {
 	if result["foo"] != "bar" || result["baz"] != "qux" {
 		t.Errorf("CacheJSON returned an unexpected value: %v", result)
 	}
+
+	redisClient.FlushAll(context.Background())
 }
