@@ -1,2 +1,2 @@
 test:
-	go test -v -cover  ./...
+	docker-compose run --rm tests
