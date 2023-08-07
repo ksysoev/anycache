@@ -1,31 +1,29 @@
-package redis_storage
+package memcache_storage
 
 import (
-	"context"
 	"errors"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache/storage"
-	"github.com/redis/go-redis"
 )
 
 type MemcachedCacheStorage struct {
-	memcached *memcache.Client
+	memcache *memcache.Client
 }
 
 // NewRedisCacheStorage creates a new RedisCacheStorage
-func NewRedisCacheStorage(memcached *memcache.Client) MemcachedCacheStorage {
-	return MemcachedCacheStorage{memcached}
+func NewMemcachedCacheStorage(memcache *memcache.Client) MemcachedCacheStorage {
+	return MemcachedCacheStorage{memcache}
 }
 
 // Get returns a value from Redis by key
 func (s MemcachedCacheStorage) Get(key string) (string, error) {
 	var value string
 
-	item, err := s.memcached.Get(context.Background(), key).Result()
+	item, err := s.memcache.Get(key)
 
-	if errors.Is(err, redis.Nil) {
+	if errors.Is(err, memcache.ErrCacheMiss) {
 		return value, storage.KeyNotExistError{}
 	}
 
@@ -33,14 +31,14 @@ func (s MemcachedCacheStorage) Get(key string) (string, error) {
 		return value, err
 	}
 
-	value = item
+	value = string(item.Value)
 	return value, nil
 }
 
 // Set sets a value in Redis by key
 func (s MemcachedCacheStorage) Set(key string, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
-		err := s.memcached.Set(context.Background(), key, value, options.TTL).Err()
+		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
 
 		if err != nil {
 			return err
@@ -49,7 +47,7 @@ func (s MemcachedCacheStorage) Set(key string, value string, options storage.Cac
 		return nil
 	}
 
-	err := s.memcached.Set(context.Background(), key, value, 0).Err()
+	err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value)})
 
 	if err != nil {
 		return err
@@ -62,36 +60,31 @@ func (s MemcachedCacheStorage) Set(key string, value string, options storage.Cac
 func (s MemcachedCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
-	item, err := s.memcached.TTL(context.Background(), key).Result()
+
+	item, err := s.memcache.Get(key)
+
+	if errors.Is(err, memcache.ErrCacheMiss) {
+		return hasTTL, -2, nil
+	}
 
 	if err != nil {
 		return hasTTL, ttl, err
 	}
 
-	if item.Nanoseconds() >= 0 {
-		return true, item, nil
+	if item.Expiration > 0 {
+		return true, time.Duration(item.Expiration) * time.Second, nil
 	}
 
-	if item.Seconds() == -1 {
-		return false, item, nil
-	}
-
-	if item.Seconds() == -2 {
-		return false, item, storage.KeyNotExistError{}
-	}
-
-	panic("Unexpected TTL value returned from Redis" + item.String())
+	return false, 0, nil
 }
 
 // Del deletes a key from Redis
 func (s MemcachedCacheStorage) Del(key string) (bool, error) {
-	deleted, err := s.memcached.Del(context.Background(), key).Result()
+	err := s.memcache.Delete(key)
 
 	if err != nil {
 		return false, err
 	}
 
-	isDeleted := deleted > 0
-
-	return isDeleted, nil
+	return true, nil
 }
