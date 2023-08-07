@@ -12,7 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func getRedisAddr() string {
+func getRedisOptions() *redis.Options {
 	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
 	if TestRedisHost == "" {
 		TestRedisHost = "localhost"
@@ -23,11 +23,11 @@ func getRedisAddr() string {
 		TestRedisPort = "6379"
 	}
 
-	return fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)
+	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort), DB: 2}
 }
 
 func TestRedisCacheStorageGet(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
 	ctx := context.Background()
@@ -50,11 +50,11 @@ func TestRedisCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
-	redisClient.FlushAll(ctx)
+	redisClient.FlushDB(ctx)
 }
 
 func TestRedisCacheStorageSet(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
 	err := redisStore.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
@@ -87,11 +87,11 @@ func TestRedisCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get valid TTL, but it has value %v", ttl.Milliseconds())
 	}
 
-	redisClient.FlushAll(context.Background())
+	redisClient.FlushDB(context.Background())
 }
 
 func TestRedisCacheStorageTTL(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
 	redisClient.Set(context.Background(), "testKey", "testValue", 1*time.Second)
@@ -127,11 +127,11 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to have no TTL, but it has")
 	}
 
-	redisClient.FlushAll(context.Background())
+	redisClient.FlushDB(context.Background())
 }
 
 func TestRedisCacheStorageDel(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
 	redisClient.Set(context.Background(), "testKey", "testValue", 0*time.Second)
@@ -144,5 +144,5 @@ func TestRedisCacheStorageDel(t *testing.T) {
 		t.Errorf("Expected to get error %v, but got '%v'", redis.Nil, err)
 	}
 
-	redisClient.FlushAll(context.Background())
+	redisClient.FlushDB(context.Background())
 }

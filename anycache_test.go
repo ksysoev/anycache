@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func getRedisAddr() string {
+func getRedisOptions() *redis.Options {
 	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
 	if TestRedisHost == "" {
 		TestRedisHost = "localhost"
@@ -24,12 +24,12 @@ func getRedisAddr() string {
 		TestRedisPort = "6379"
 	}
 
-	return fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)
+	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort), DB: 1}
 }
 
 // Map storage tests
 func TestCache(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
@@ -63,11 +63,11 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get empty string, but got '%v'", val)
 	}
 
-	redisClient.FlushAll(context.Background())
+	redisClient.FlushDB(context.Background())
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
@@ -103,14 +103,18 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr(), DB: 1})
+	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
-	cacheOptions := CacheItemOptions{TTL: 3 * time.Second, WarmUpTTL: 2 * time.Second}
+	cacheOptions := CacheItemOptions{TTL: 2 * time.Second, WarmUpTTL: 1 * time.Second}
 
-	val, _ := cache.Cache("testKey", func() (string, error) {
+	val, err := cache.Cache("testKey", func() (string, error) {
 		return "testValue", nil
 	}, cacheOptions)
+
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
 	if val != "testValue" {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
@@ -121,18 +125,27 @@ func TestCacheWarmingUp(t *testing.T) {
 	time.Sleep(time.Millisecond * 1001)
 
 	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache("testKey", func() (string, error) {
+		val, err := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, cacheOptions)
+
+		if err != nil {
+			t.Errorf("Expected to get no error, but got %v", err)
+		}
 		ch <- val
 	}(&cache, results)
 
 	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache("testKey", func() (string, error) {
+		val, err := c.Cache("testKey", func() (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, cacheOptions)
+
+		if err != nil {
+			t.Errorf("Expected to get no error, but got %v", err)
+		}
+
 		ch <- val
 	}(&cache, results)
 
@@ -167,7 +180,7 @@ func TestRandomizeTTL(t *testing.T) {
 func TestCacheJSON(t *testing.T) {
 	// Create a new cache instance
 
-	redisClient := redis.NewClient(&redis.Options{Addr: getRedisAddr()})
+	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
 
