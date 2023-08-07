@@ -1,19 +1,38 @@
 package redis_storage
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/go-redis/redismock/v9"
 	"github.com/ksysoev/anycache/storage"
+	"github.com/redis/go-redis/v9"
 )
 
+func getRedisOptions() *redis.Options {
+	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
+	if TestRedisHost == "" {
+		TestRedisHost = "localhost"
+	}
+
+	TestRedisPort := os.Getenv("TEST_REDIS_PORT")
+	if TestRedisPort == "" {
+		TestRedisPort = "6379"
+	}
+
+	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort), DB: 2}
+}
+
 func TestRedisCacheStorageGet(t *testing.T) {
-	redisClient, mock := redismock.NewClientMock()
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	mock.ExpectGet("testKey").SetVal("testValue")
+	ctx := context.Background()
+
+	redisClient.Set(ctx, "testKey", "testValue", 0*time.Second)
 
 	value, err := redisStore.Get("testKey")
 
@@ -25,23 +44,18 @@ func TestRedisCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", value)
 	}
 
-	mock.ExpectGet("testKey1").RedisNil()
 	_, err = redisStore.Get("testKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Error(err)
-	}
+	redisClient.FlushDB(ctx)
 }
 
 func TestRedisCacheStorageSet(t *testing.T) {
-	redisClient, mock := redismock.NewClientMock()
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
-
-	mock.ExpectSet("testKey", "testValue", 0).SetVal("OK")
 
 	err := redisStore.Set("testKey", "testValue", storage.CacheStorageItemOptions{})
 
@@ -49,23 +63,38 @@ func TestRedisCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	mock.ExpectSet("testKey1", "testValue", 1*time.Second).SetVal("OK")
-	err = redisStore.Set("testKey1", "testValue", storage.CacheStorageItemOptions{TTL: 1 * time.Second})
+	val, _ := redisClient.Get(context.Background(), "testKey").Result()
+
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
+	}
+
+	err = redisStore.Set("testKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if err = mock.ExpectationsWereMet(); err != nil {
-		t.Errorf("there were unfulfilled expectations: %s", err)
+	val1, _ := redisClient.Get(context.Background(), "testKey1").Result()
+
+	if val1 != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val1)
 	}
+
+	ttl, _ := redisClient.TTL(context.Background(), "testKey1").Result()
+
+	if ttl.Milliseconds() <= 0 || ttl.Milliseconds() > 2000 {
+		t.Errorf("Expected to get valid TTL, but it has value %v", ttl.Milliseconds())
+	}
+
+	redisClient.FlushDB(context.Background())
 }
 
 func TestRedisCacheStorageTTL(t *testing.T) {
-	redisClient, mock := redismock.NewClientMock()
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	mock.ExpectTTL("testKey").SetVal(1 * time.Second)
+	redisClient.Set(context.Background(), "testKey", "testValue", 1*time.Second)
 
 	hasTTL, ttl, err := redisStore.TTL("testKey")
 
@@ -77,20 +106,18 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to have TTL, but it doesnt")
 	}
 
-	if ttl.Milliseconds() != 1000 {
+	if ttl.Milliseconds() < 0 || ttl.Milliseconds() > 1000 {
 		t.Errorf("Expected to get TTL as 1000 millisecond, but it has value %v microseconds", ttl.Milliseconds())
 	}
 
-	mock.ExpectTTL("testKey1").SetVal(-2 * time.Second)
-	_, ttl, err = redisStore.TTL("testKey1")
+	_, _, err = redisStore.TTL("testKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
-	mock.ExpectTTL("testKey2").SetVal(-1 * time.Second)
-
-	hasTTL, ttl, err = redisStore.TTL("testKey2")
+	redisClient.Set(context.Background(), "testKey2", "testValue", 0*time.Second)
+	hasTTL, _, err = redisStore.TTL("testKey2")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -100,20 +127,22 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to have no TTL, but it has")
 	}
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Error(err)
-	}
+	redisClient.FlushDB(context.Background())
 }
 
 func TestRedisCacheStorageDel(t *testing.T) {
-	redisClient, mock := redismock.NewClientMock()
+	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	mock.ExpectDel("testKey").SetVal(1)
+	redisClient.Set(context.Background(), "testKey", "testValue", 0*time.Second)
 
 	redisStore.Del("testKey")
 
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Error(err)
+	_, err := redisClient.Get(context.Background(), "testKey").Result()
+
+	if !errors.Is(err, redis.Nil) {
+		t.Errorf("Expected to get error %v, but got '%v'", redis.Nil, err)
 	}
+
+	redisClient.FlushDB(context.Background())
 }
