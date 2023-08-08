@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/ksysoev/anycache/storage/memcache_storage"
 	"github.com/ksysoev/anycache/storage/redis_storage"
 	"github.com/redis/go-redis/v9"
 )
@@ -26,79 +28,105 @@ func getRedisOptions() *redis.Options {
 	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)}
 }
 
-// Map storage tests
-func TestCache(t *testing.T) {
+func getMemcachedHost() string {
+	TestRedisHost := os.Getenv("TEST_MEMCACHED_HOST")
+	if TestRedisHost == "" {
+		TestRedisHost = "localhost"
+	}
 
+	TestRedisPort := os.Getenv("TEST_MEMCACHED_PORT")
+	if TestRedisPort == "" {
+		TestRedisPort = "11211"
+	}
+
+	return fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)
+}
+
+func getCacheStorages() map[string]CacheStorage {
 	redisClient := redis.NewClient(getRedisOptions())
-	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache(cacheStore, CacheOptions{})
+	redisStore := redis_storage.NewRedisCacheStorage(redisClient)
 
-	val, err := cache.Cache("TestCacheKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
+	memcachedClient := memcache.New(getMemcachedHost())
+	memcachedStore := memcache_storage.NewMemcachedCacheStorage(memcachedClient)
 
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
+	return map[string]CacheStorage{
+		"redis":     redisStore,
+		"memcached": memcachedStore,
 	}
+}
 
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
+func TestCache(t *testing.T) {
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage, CacheOptions{})
 
-	val, err = cache.Cache("TestCacheKey", func() (string, error) { return "testValue1", nil }, CacheItemOptions{})
+		val, err := cache.Cache("TestCacheKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
 
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
+		if err != nil {
+			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
+		}
 
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
+		if val != "testValue" {
+			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
+		}
 
-	val, err = cache.Cache("TestCacheKey1", func() (string, error) { return "", errors.New("TestError") }, CacheItemOptions{})
+		val, err = cache.Cache("TestCacheKey", func() (string, error) { return "testValue1", nil }, CacheItemOptions{})
 
-	if err == errors.New("TestError") {
-		t.Errorf("Expected to get TestError, but got %v", err)
-	}
+		if err != nil {
+			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
+		}
 
-	if val != "" {
-		t.Errorf("Expected to get empty string, but got '%v'", val)
+		if val != "testValue" {
+			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
+		}
+
+		val, err = cache.Cache("TestCacheKey1", func() (string, error) { return "", errors.New("TestError") }, CacheItemOptions{})
+
+		if err == errors.New("TestError") {
+			t.Errorf("%v: Expected to get TestError, but got %v", storageName, err)
+		}
+
+		if val != "" {
+			t.Errorf("%v: Expected to get empty string, but got '%v'", storageName, val)
+		}
 	}
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	redisClient := redis.NewClient(getRedisOptions())
-	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache(cacheStore, CacheOptions{})
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage, CacheOptions{})
 
-	results := make(chan string)
+		results := make(chan string)
 
-	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
-			time.Sleep(time.Millisecond)
-			return "testValue", nil
-		}, CacheItemOptions{})
-		ch <- val
-	}(&cache, results)
+		go func(c *Cache, ch chan string) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
+				time.Sleep(time.Millisecond)
+				return "testValue", nil
+			}, CacheItemOptions{})
+			ch <- val
+		}(&cache, results)
 
-	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
-			time.Sleep(time.Millisecond)
-			return "testValue1", nil
-		}, CacheItemOptions{})
-		ch <- val
-	}(&cache, results)
+		go func(c *Cache, ch chan string) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
+				time.Sleep(time.Millisecond)
+				return "testValue1", nil
+			}, CacheItemOptions{})
+			ch <- val
+		}(&cache, results)
 
-	val1, val2 := <-results, <-results
+		val1, val2 := <-results, <-results
 
-	if val1 != "testValue" && val1 != "testValue1" {
-		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
-	}
+		if val1 != "testValue" && val1 != "testValue1" {
+			t.Errorf("%v: Expected to get testValue as a result, but got '%v'", storageName, val1)
+		}
 
-	if val1 != val2 {
-		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
+		if val1 != val2 {
+			t.Errorf("%v: Expected to get same result for concurent requests, but got '%v' and '%v", storageName, val1, val2)
+		}
 	}
 }
 
 func TestCacheWarmingUp(t *testing.T) {
+	// For now, we test only Redis storage becuase Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore, CacheOptions{})
@@ -172,50 +200,48 @@ func TestRandomizeTTL(t *testing.T) {
 }
 
 func TestCacheJSON(t *testing.T) {
-	// Create a new cache instance
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage, CacheOptions{})
 
-	redisClient := redis.NewClient(getRedisOptions())
-	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache(cacheStore, CacheOptions{})
+		// Define a test key and value
+		key := "TestCacheJSONKey"
+		value := map[string]string{
+			"foo": "bar",
+			"baz": "qux",
+		}
 
-	// Define a test key and value
-	key := "TestCacheJSONKey"
-	value := map[string]string{
-		"foo": "bar",
-		"baz": "qux",
-	}
+		// Define a generator function that returns the test value
+		generator := func() (any, error) {
+			return value, nil
+		}
 
-	// Define a generator function that returns the test value
-	generator := func() (any, error) {
-		return value, nil
-	}
+		// Define a result variable to hold the unmarshalled JSON value
+		var result map[string]string
 
-	// Define a result variable to hold the unmarshalled JSON value
-	var result map[string]string
+		// Call the CacheJSON function to cache the test value
+		err := cache.CacheJSON(key, generator, &result, CacheItemOptions{})
 
-	// Call the CacheJSON function to cache the test value
-	err := cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+		// Check that the function returned no errors
+		if err != nil {
+			t.Errorf("%v: CacheJSON returned an error: %v", storageName, err)
+		}
 
-	// Check that the function returned no errors
-	if err != nil {
-		t.Errorf("CacheJSON returned an error: %v", err)
-	}
+		// Check that the result variable contains the expected value
+		if result["foo"] != "bar" || result["baz"] != "qux" {
+			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
+		}
 
-	// Check that the result variable contains the expected value
-	if result["foo"] != "bar" || result["baz"] != "qux" {
-		t.Errorf("CacheJSON returned an unexpected value: %v", result)
-	}
+		// Call the CacheJSON function again to read value from storage
+		err = cache.CacheJSON(key, generator, &result, CacheItemOptions{})
 
-	// Call the CacheJSON function again to read value from storage
-	err = cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+		// Check that the function returned no errors
+		if err != nil {
+			t.Errorf("%v: CacheJSON returned an error: %v", storageName, err)
+		}
 
-	// Check that the function returned no errors
-	if err != nil {
-		t.Errorf("CacheJSON returned an error: %v", err)
-	}
-
-	// Check that the result variable contains the expected value
-	if result["foo"] != "bar" || result["baz"] != "qux" {
-		t.Errorf("CacheJSON returned an unexpected value: %v", result)
+		// Check that the result variable contains the expected value
+		if result["foo"] != "bar" || result["baz"] != "qux" {
+			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
+		}
 	}
 }
