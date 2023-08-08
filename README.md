@@ -25,7 +25,7 @@ go get github.com/ksysoev/anycache
 
 Here's an example of how to use anycache to cache the result of a function that generates a random number:
 
-```
+```golang
 package main
 
 import (
