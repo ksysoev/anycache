@@ -64,7 +64,7 @@ func (s MemcachedCacheStorage) TTL(key string) (bool, time.Duration, error) {
 	item, err := s.memcache.Get(key)
 
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return hasTTL, -2, nil
+		return hasTTL, ttl, storage.KeyNotExistError{}
 	}
 
 	if err != nil {
