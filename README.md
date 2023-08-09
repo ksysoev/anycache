@@ -33,8 +33,9 @@ import (
     "math/rand"
     "time"
 
+    "github.com/redis/go-redis/v9"
     "github.com/ksysoev/anycache"
-    "github.com/ksysoev/anycache/storage/redis"
+    "github.com/ksysoev/anycache/storage/redis_storage"
 )
 
 func main() {
@@ -42,7 +43,10 @@ func main() {
         Addr: "localhost:6379",
     })
 
-    cache := anycache.NewCache(redisClient, anycache.CacheOptions{
+    redisStorage := redis_storage.NewRedisCacheStorage(redisClient)
+
+
+    cache := anycache.NewCache(redisStorage, anycache.CacheOptions{
         RandomizeTTL: true,
     })
 

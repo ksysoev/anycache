@@ -44,7 +44,7 @@ type CacheResponse struct {
 
 // CacheOptions
 type CacheOptions struct {
-	randomizeTTL bool
+	RandomizeTTL bool
 }
 
 // CacheItemOptions
@@ -63,7 +63,7 @@ type CacheQueue struct {
 func NewCache(storage CacheStorage, options CacheOptions) Cache {
 	c := Cache{
 		Storage:      storage,
-		randomizeTTL: options.randomizeTTL,
+		randomizeTTL: options.RandomizeTTL,
 		requests:     make(chan CacheReuest),
 		responses:    make(chan CacheResponse),
 	}
