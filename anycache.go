@@ -2,6 +2,7 @@
 package anycache
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -34,6 +35,7 @@ type CacheReuest struct {
 	TTL       time.Duration
 	WarmUpTTL time.Duration
 	response  chan CacheResponse
+	ctx       context.Context
 }
 
 type CacheResponse struct {
@@ -88,13 +90,21 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	}
 }
 
+func WithCtx(ctx context.Context) CacheItemOptions {
+	return func(req *CacheReuest) {
+		req.ctx = ctx
+	}
+}
+
 func (c *Cache) Cache(key string, generator func() (string, error), opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
+	defer close(response)
 
 	req := CacheReuest{
 		key:       key,
 		generator: generator,
 		response:  response,
+		ctx:       context.Background(),
 	}
 
 	for _, opt := range opts {
@@ -103,10 +113,12 @@ func (c *Cache) Cache(key string, generator func() (string, error), opts ...Cach
 
 	c.requests <- req
 
-	resp := <-response
-	close(response)
-
-	return resp.value, resp.err
+	select {
+	case <-req.ctx.Done():
+		return "", req.ctx.Err()
+	case resp := <-response:
+		return resp.value, resp.err
+	}
 }
 
 func (c *Cache) CacheStruct(key string, generator func() (any, error), result any, opts ...CacheItemOptions) error {
