@@ -35,7 +35,7 @@ import (
 
     "github.com/redis/go-redis/v9"
     "github.com/ksysoev/anycache"
-    "github.com/ksysoev/anycache/storage/redis_storage"
+    "github.com/ksysoev/anycache/storage/redis"
 )
 
 func main() {
@@ -43,28 +43,26 @@ func main() {
         Addr: "localhost:6379",
     })
 
-    redisStorage := redis_storage.NewRedisCacheStorage(redisClient)
+    redisStorage := redisstor.NewRedisCacheStorage(redisClient)
 
-
-    cache := anycache.NewCache(redisStorage, anycache.CacheOptions{
-        RandomizeTTL: true,
-    })
+    // Creates anycache with 10% TTL randomization
+    cache := anycache.NewCache(redisStorage, WithTTLRandomization(10))
 
     key := "random_number"
-    ttl := 5 * time.Minute
-    warmUpTTL := 1 * time.Minute
+    ttl := 
+    warmUpTTL := 
 
     generator := func() (string, error) {
         randomNumber := rand.Intn(100)
         return fmt.Sprintf("%d", randomNumber), nil
     }
 
-    options := anycache.CacheItemOptions{
-        TTL:       ttl,
-        WarmUpTTL: warmUpTTL,
-    }
-
-    value, err := cache.Cache(key, generator, options)
+    value, err := cache.Cache(
+        key, 
+        generator, 
+        WithTTL(5 * time.Minute), 
+        WithWarmUpTTL(1 * time.Minute)
+    )
 
     if err != nil {
         fmt.Printf("Error caching value: %v\n", err)

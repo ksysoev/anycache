@@ -1,4 +1,4 @@
-package redisstore
+package redisstor
 
 import (
 	"context"

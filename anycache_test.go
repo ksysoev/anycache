@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
-	memcachestore "github.com/ksysoev/anycache/storage/memcache"
-	redisstore "github.com/ksysoev/anycache/storage/redis"
+	memcachestor "github.com/ksysoev/anycache/storage/memcache"
+	redisstor "github.com/ksysoev/anycache/storage/redis"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -44,10 +44,10 @@ func getMemcachedHost() string {
 
 func getCacheStorages() map[string]CacheStorage {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := redisstore.NewRedisCacheStorage(redisClient)
+	redisStore := redisstor.NewRedisCacheStorage(redisClient)
 
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcachedStore := memcachestore.NewMemcachedCacheStorage(memcachedClient)
+	memcachedStore := memcachestor.NewMemcachedCacheStorage(memcachedClient)
 
 	return map[string]CacheStorage{
 		"redis":     redisStore,
@@ -135,7 +135,7 @@ func TestCacheConcurrency(t *testing.T) {
 func TestCacheWarmingUp(t *testing.T) {
 	// For now, we test only Redis storage becuase Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
-	cacheStore := redisstore.NewRedisCacheStorage(redisClient)
+	cacheStore := redisstor.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore)
 
 	val, err := cache.Cache("TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
