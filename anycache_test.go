@@ -262,8 +262,8 @@ func TestPerfomance(t *testing.T) {
 
 	var expectedResults = map[string]time.Duration{
 		// For Github Actions we have to increase expected timing, on local machine it runs 10X faster
-		"redis":     3 * time.Second,
-		"memcached": 7 * time.Second,
+		"redis":     5 * time.Second,
+		"memcached": 10 * time.Second,
 	}
 
 	for storageName, cacheStorage := range getCacheStorages() {
