@@ -55,21 +55,18 @@ func getCacheStorages() map[string]CacheStorage {
 	}
 }
 
+func getGenerator(val string, err error) func() (string, error) {
+
+	return func() (string, error) {
+		return val, err
+	}
+}
+
 func TestCache(t *testing.T) {
 	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage, CacheOptions{})
+		cache := NewCache(cacheStorage)
 
-		val, err := cache.Cache("TestCacheKey", func() (string, error) { return "testValue", nil }, CacheItemOptions{})
-
-		if err != nil {
-			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
-		}
-
-		if val != "testValue" {
-			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
-		}
-
-		val, err = cache.Cache("TestCacheKey", func() (string, error) { return "testValue1", nil }, CacheItemOptions{})
+		val, err := cache.Cache("TestCacheKey", getGenerator("testValue", nil))
 
 		if err != nil {
 			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
@@ -79,7 +76,17 @@ func TestCache(t *testing.T) {
 			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
 		}
 
-		val, err = cache.Cache("TestCacheKey1", func() (string, error) { return "", errors.New("TestError") }, CacheItemOptions{})
+		val, err = cache.Cache("TestCacheKey", getGenerator("testValue1", nil))
+
+		if err != nil {
+			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
+		}
+
+		if val != "testValue" {
+			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
+		}
+
+		val, err = cache.Cache("TestCacheKey1", getGenerator("", errors.New("TestError")))
 
 		if err == errors.New("TestError") {
 			t.Errorf("%v: Expected to get TestError, but got %v", storageName, err)
@@ -93,7 +100,7 @@ func TestCache(t *testing.T) {
 
 func TestCacheConcurrency(t *testing.T) {
 	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage, CacheOptions{})
+		cache := NewCache(cacheStorage)
 
 		results := make(chan string)
 
@@ -101,7 +108,7 @@ func TestCacheConcurrency(t *testing.T) {
 			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue", nil
-			}, CacheItemOptions{})
+			})
 			ch <- val
 		}(&cache, results)
 
@@ -109,7 +116,7 @@ func TestCacheConcurrency(t *testing.T) {
 			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue1", nil
-			}, CacheItemOptions{})
+			})
 			ch <- val
 		}(&cache, results)
 
@@ -129,12 +136,11 @@ func TestCacheWarmingUp(t *testing.T) {
 	// For now, we test only Redis storage becuase Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redis_storage.NewRedisCacheStorage(redisClient)
-	cache := NewCache(cacheStore, CacheOptions{})
-	cacheOptions := CacheItemOptions{TTL: 2 * time.Second, WarmUpTTL: 1 * time.Second}
+	cache := NewCache(cacheStore)
 
 	val, err := cache.Cache("TestCacheWarmingUpKey", func() (string, error) {
 		return "testValue", nil
-	}, cacheOptions)
+	}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -152,7 +158,7 @@ func TestCacheWarmingUp(t *testing.T) {
 		val, err := c.Cache("TestCacheWarmingUpKey", func() (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
-		}, cacheOptions)
+		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 
 		if err != nil {
 			t.Errorf("Expected to get no error, but got %v", err)
@@ -164,7 +170,7 @@ func TestCacheWarmingUp(t *testing.T) {
 		val, err := c.Cache("TestCacheWarmingUpKey", func() (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
-		}, cacheOptions)
+		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 
 		if err != nil {
 			t.Errorf("Expected to get no error, but got %v", err)
@@ -188,7 +194,7 @@ func TestCacheWarmingUp(t *testing.T) {
 
 func TestRandomizeTTL(t *testing.T) {
 	rand.Seed(1)
-	ttl := randomizeTTL(100 * time.Second)
+	ttl := randomizeTTL(10, 100*time.Second)
 
 	if ttl < 90*time.Second || ttl > 110*time.Second {
 		t.Errorf("Expected to get ttl between 90 and 110 seconds, but got %v", ttl)
@@ -201,7 +207,7 @@ func TestRandomizeTTL(t *testing.T) {
 
 func TestCacheJSON(t *testing.T) {
 	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage, CacheOptions{})
+		cache := NewCache(cacheStorage)
 
 		// Define a test key and value
 		key := "TestCacheJSONKey"
@@ -219,7 +225,7 @@ func TestCacheJSON(t *testing.T) {
 		var result map[string]string
 
 		// Call the CacheJSON function to cache the test value
-		err := cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+		err := cache.CacheStruct(key, generator, &result)
 
 		// Check that the function returned no errors
 		if err != nil {
@@ -232,7 +238,7 @@ func TestCacheJSON(t *testing.T) {
 		}
 
 		// Call the CacheJSON function again to read value from storage
-		err = cache.CacheJSON(key, generator, &result, CacheItemOptions{})
+		err = cache.CacheStruct(key, generator, &result)
 
 		// Check that the function returned no errors
 		if err != nil {

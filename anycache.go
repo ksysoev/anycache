@@ -22,16 +22,17 @@ type CacheStorage interface {
 
 // Cache
 type Cache struct {
-	Storage      CacheStorage
-	randomizeTTL bool
-	requests     chan CacheReuest
-	responses    chan CacheResponse
+	Storage     CacheStorage
+	maxShiftTTL uint8 // max shift of TTL in persent
+	requests    chan CacheReuest
+	responses   chan CacheResponse
 }
 
 type CacheReuest struct {
 	key       string
 	generator func() (string, error)
-	options   CacheItemOptions
+	TTL       time.Duration
+	WarmUpTTL time.Duration
 	response  chan CacheResponse
 }
 
@@ -42,30 +43,26 @@ type CacheResponse struct {
 	warmingUp bool
 }
 
-// CacheOptions
-type CacheOptions struct {
-	RandomizeTTL bool
-}
-
-// CacheItemOptions
-type CacheItemOptions struct {
-	TTL       time.Duration
-	WarmUpTTL time.Duration
-}
-
 type CacheQueue struct {
 	requests     []CacheReuest
 	WarmingUp    bool
 	currentValue string
 }
 
+type CacheOptions func(*Cache)
+
+type CacheItemOptions func(*CacheReuest)
+
 // NewCache creates instance of Cache
-func NewCache(storage CacheStorage, options CacheOptions) Cache {
+func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
 	c := Cache{
-		Storage:      storage,
-		randomizeTTL: options.RandomizeTTL,
-		requests:     make(chan CacheReuest),
-		responses:    make(chan CacheResponse),
+		Storage:   storage,
+		requests:  make(chan CacheReuest),
+		responses: make(chan CacheResponse),
+	}
+
+	for _, opt := range opts {
+		opt(&c)
 	}
 
 	go c.requestHandler()
@@ -73,15 +70,38 @@ func NewCache(storage CacheStorage, options CacheOptions) Cache {
 	return c
 }
 
-func (c *Cache) Cache(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
+func WithTTLRandomization(maxShiftPercent uint8) func(*Cache) {
+	return func(c *Cache) {
+		c.maxShiftTTL = maxShiftPercent
+	}
+}
+
+func WithTTL(ttl time.Duration) CacheItemOptions {
+	return func(req *CacheReuest) {
+		req.TTL = ttl
+	}
+}
+
+func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
+	return func(req *CacheReuest) {
+		req.WarmUpTTL = ttl
+	}
+}
+
+func (c *Cache) Cache(key string, generator func() (string, error), opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
 
-	c.requests <- CacheReuest{
+	req := CacheReuest{
 		key:       key,
 		generator: generator,
-		options:   options,
 		response:  response,
 	}
+
+	for _, opt := range opts {
+		opt(&req)
+	}
+
+	c.requests <- req
 
 	resp := <-response
 	close(response)
@@ -89,7 +109,7 @@ func (c *Cache) Cache(key string, generator func() (string, error), options Cach
 	return resp.value, resp.err
 }
 
-func (c *Cache) CacheJSON(key string, generator func() (any, error), result any, options CacheItemOptions) error {
+func (c *Cache) CacheStruct(key string, generator func() (any, error), result any, opts ...CacheItemOptions) error {
 	generatorWrapper := func() (string, error) {
 		val, err := generator()
 
@@ -106,7 +126,7 @@ func (c *Cache) CacheJSON(key string, generator func() (any, error), result any,
 		return string(jsonVal), nil
 	}
 
-	val, err := c.Cache(key, generatorWrapper, options)
+	val, err := c.Cache(key, generatorWrapper, opts...)
 
 	if err != nil {
 		return err
@@ -140,7 +160,7 @@ func (c *Cache) requestHandler() {
 			}
 
 			requestStorage[req.key] = CacheQueue{requests: []CacheReuest{req}}
-			go c.processRequest(req.key, req.generator, req.options)
+			go c.processRequest(req)
 
 		case resp := <-c.responses:
 
@@ -181,28 +201,28 @@ func (c *Cache) requestHandler() {
 // If the cache item options include a warm-up TTL, it checks if the current TTL of the key is less than or equal to the warm-up TTL.
 // If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
 // and returns the new value and any error encountered.
-func (c *Cache) processRequest(key string, generator func() (string, error), options CacheItemOptions) {
+func (c *Cache) processRequest(req CacheReuest) {
 	var value string
 	var err error
 	var needWarmUp bool
-	if options.WarmUpTTL.Nanoseconds() > 0 {
+	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
-		value, ttl, err = c.GetWithTTL(key)
+		value, ttl, err = c.GetWithTTL(req.key)
 
-		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= options.WarmUpTTL.Nanoseconds()
+		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
 		if err == nil && readyForWarmUp {
 			needWarmUp = true
 		}
 	} else {
-		value, err = c.Storage.Get(key)
+		value, err = c.Storage.Get(req.key)
 	}
 
 	if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
-		value, err = c.generateAndSet(key, generator, options)
+		value, err = c.generateAndSet(req)
 	}
 
 	cacheResp := CacheResponse{
-		key:       key,
+		key:       req.key,
 		value:     value,
 		err:       err,
 		warmingUp: needWarmUp,
@@ -211,10 +231,10 @@ func (c *Cache) processRequest(key string, generator func() (string, error), opt
 	c.responses <- cacheResp
 
 	if needWarmUp {
-		newVal, err := c.generateAndSet(key, generator, options)
+		newVal, err := c.generateAndSet(req)
 
 		cacheResp := CacheResponse{
-			key:       key,
+			key:       req.key,
 			value:     newVal,
 			err:       err,
 			warmingUp: false,
@@ -247,20 +267,16 @@ func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(key string, generator func() (string, error), options CacheItemOptions) (string, error) {
-	value, err := generator()
+func (c *Cache) generateAndSet(req CacheReuest) (string, error) {
+	value, err := req.generator()
 
 	if err != nil {
 		return value, err
 	}
 
-	ttl := options.TTL
+	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
-	if c.randomizeTTL {
-		ttl = randomizeTTL(options.TTL)
-	}
-
-	err = c.Storage.Set(key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
 
 	if err != nil {
 		return value, err
@@ -272,13 +288,13 @@ func (c *Cache) generateAndSet(key string, generator func() (string, error), opt
 // randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
 // It takes a time.Duration as input and returns a time.Duration as output.
 // If the input duration is zero, it returns the same duration.
-func randomizeTTL(ttl time.Duration) time.Duration {
-	if ttl.Nanoseconds() == 0 {
+func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
+	if maxShiftTTL == 0 || ttl.Nanoseconds() == 0 {
 		return ttl
 	}
 
-	MaxShift := float64(ttl.Nanoseconds()) * persentOfRandomTTL / 100.0
-	randomizedShift := int64((MaxShift * (float64(rand.Intn(100)) - 50.0) / 100.0))
+	MaxShift := int64(ttl.Nanoseconds()) * int64(maxShiftTTL) / 100
+	randomizedShift := int64(float64(MaxShift) * (float64(rand.Intn(100)) - 50.0) / 100.0)
 
 	randomizedTTL := ttl.Nanoseconds() + randomizedShift
 	return time.Duration(randomizedTTL)
