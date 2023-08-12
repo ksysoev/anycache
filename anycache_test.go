@@ -261,7 +261,7 @@ func TestPerfomance(t *testing.T) {
 	)
 
 	var expectedResults = map[string]time.Duration{
-		// For Github Actions we have to increase expected timing, on local machine it runs 10X faster
+		// For Github Actions we have to increase expected timing, on local machine it runs >20X faster
 		"redis":     5 * time.Second,
 		"memcached": 10 * time.Second,
 	}
@@ -296,5 +296,7 @@ func TestPerfomance(t *testing.T) {
 			numberOfRequests := MaxConcurrency * RequestsPerThread
 			t.Errorf("Total time of execution for %s: %d requests per  %v\n", storageName, numberOfRequests, time.Since(startTime))
 		}
+
+		fmt.Printf("Total time of execution for %s: %v\n", storageName, time.Since(startTime))
 	}
 }
