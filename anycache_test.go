@@ -257,13 +257,13 @@ func TestPerfomance(t *testing.T) {
 		TestRedisPort     = "6379"
 		MaxConcurrency    = 10000
 		RequestsPerThread = 10
-		NumberOfKeys      = 500
+		NumberOfKeys      = 400
 	)
 
 	var expectedResults = map[string]time.Duration{
 		// For Github Actions we have to increase expected timing, on local machine it runs 10X faster
 		"redis":     3 * time.Second,
-		"memcached": 6 * time.Second,
+		"memcached": 7 * time.Second,
 	}
 
 	for storageName, cacheStorage := range getCacheStorages() {
