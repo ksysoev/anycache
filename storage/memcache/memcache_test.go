@@ -1,4 +1,4 @@
-package memcache_storage
+package memcachestore
 
 import (
 	"errors"
