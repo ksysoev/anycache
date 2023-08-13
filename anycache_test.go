@@ -1,6 +1,7 @@
 package anycache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -247,6 +248,33 @@ func TestCacheJSON(t *testing.T) {
 		// Check that the result variable contains the expected value
 		if result["foo"] != "bar" || result["baz"] != "qux" {
 			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
+		}
+	}
+}
+
+func TestCancelingRequest(t *testing.T) {
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage)
+
+		// Define a generator function that returns the test value
+		generator := func() (string, error) {
+			time.Sleep(time.Millisecond * 500)
+			return "testValue", nil
+		}
+
+		// Call the CacheJSON function to cache the test value
+		ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*100)
+
+		result, err := cache.Cache("TestCancelingRequestKey", generator, WithTTL(2*time.Second), WithCtx(ctx))
+
+		// Check that the function returned no errors
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("%v: Cache returned unexpected error: %v", storageName, err)
+		}
+
+		// Check that the result variable contains the expected value
+		if result != "" {
+			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
 		}
 	}
 }
