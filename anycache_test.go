@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -247,5 +248,55 @@ func TestCacheJSON(t *testing.T) {
 		if result["foo"] != "bar" || result["baz"] != "qux" {
 			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
 		}
+	}
+}
+
+func TestPerfomance(t *testing.T) {
+	const (
+		TestRedisHost     = "localhost"
+		TestRedisPort     = "6379"
+		MaxConcurrency    = 10000
+		RequestsPerThread = 10
+		NumberOfKeys      = 400
+	)
+
+	var expectedResults = map[string]time.Duration{
+		// For Github Actions we have to increase expected timing, on local machine it runs >20X faster
+		"redis":     5 * time.Second,
+		"memcached": 10 * time.Second,
+	}
+
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage)
+
+		startTime := time.Now()
+		var wg sync.WaitGroup
+		for i := 0; i < MaxConcurrency; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < RequestsPerThread; i++ {
+					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
+
+					_, err := cache.Cache(key, func() (string, error) {
+						return fmt.Sprintf("value%d", rand.Intn(10)), nil
+					})
+
+					if err != nil {
+						fmt.Printf("Error caching value for key %s: %v\n", key, err)
+						continue
+					}
+				}
+			}()
+		}
+
+		wg.Wait()
+
+		if time.Since(startTime) > expectedResults[storageName] {
+			numberOfRequests := MaxConcurrency * RequestsPerThread
+			t.Errorf("Total time of execution for %s: %d requests per  %v\n", storageName, numberOfRequests, time.Since(startTime))
+		}
+
+		fmt.Printf("Total time of execution for %s: %v\n", storageName, time.Since(startTime))
 	}
 }

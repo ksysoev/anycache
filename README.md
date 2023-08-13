@@ -48,17 +48,13 @@ func main() {
     // Creates anycache with 10% TTL randomization
     cache := anycache.NewCache(redisStorage, WithTTLRandomization(10))
 
-    key := "random_number"
-    ttl := 
-    warmUpTTL := 
-
     generator := func() (string, error) {
         randomNumber := rand.Intn(100)
         return fmt.Sprintf("%d", randomNumber), nil
     }
 
     value, err := cache.Cache(
-        key, 
+        "random_number_key", 
         generator, 
         WithTTL(5 * time.Minute), 
         WithWarmUpTTL(1 * time.Minute)

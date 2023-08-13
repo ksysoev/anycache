@@ -55,7 +55,9 @@ type CacheOptions func(*Cache)
 
 type CacheItemOptions func(*CacheReuest)
 
-// NewCache creates instance of Cache
+// NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
+// WithTTLRandomization sets max shift of TTL in persent
+// It returns the created Cache instance.
 func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
 	c := Cache{
 		Storage:   storage,
@@ -72,18 +74,21 @@ func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
 	return c
 }
 
+// WithTTLRandomization sets max shift of TTL in persent
 func WithTTLRandomization(maxShiftPercent uint8) func(*Cache) {
 	return func(c *Cache) {
 		c.maxShiftTTL = maxShiftPercent
 	}
 }
 
+// WithTTL sets TTL for cache item
 func WithTTL(ttl time.Duration) CacheItemOptions {
 	return func(req *CacheReuest) {
 		req.TTL = ttl
 	}
 }
 
+// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	return func(req *CacheReuest) {
 		req.WarmUpTTL = ttl
@@ -96,6 +101,13 @@ func WithCtx(ctx context.Context) CacheItemOptions {
 	}
 }
 
+// Cache caches the result of the generator function for the given key.
+// If the key already exists in the cache, the cached value is returned.
+// Otherwise, the generator function is called to generate a new value,
+// which is then cached and returned.
+// The function takes an optional list of CacheItemOptions to customize the caching behavior.
+// WithTTL sets TTL for cache item
+// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func (c *Cache) Cache(key string, generator func() (string, error), opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
 	defer close(response)
@@ -121,6 +133,14 @@ func (c *Cache) Cache(key string, generator func() (string, error), opts ...Cach
 	}
 }
 
+// CacheStruct caches the result of a function that returns a struct.
+// The key is used to identify the cached value.
+// The generator function is called to generate the value if it is not already cached.
+// The result parameter is a pointer to the struct that will be populated with the cached value.
+// The opts parameter is optional and can be used to set additional cache item options.
+// WithTTL sets TTL for cache item
+// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
+// Returns an error if there was a problem caching or unmarshalling the value.
 func (c *Cache) CacheStruct(key string, generator func() (any, error), result any, opts ...CacheItemOptions) error {
 	generatorWrapper := func() (string, error) {
 		val, err := generator()
