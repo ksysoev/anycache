@@ -11,8 +11,6 @@ import (
 	"github.com/ksysoev/anycache/storage"
 )
 
-const persentOfRandomTTL = 10.0
-
 // CacheStorage
 type CacheStorage interface {
 	Get(string) (string, error)
@@ -25,8 +23,9 @@ type CacheStorage interface {
 type Cache struct {
 	Storage     CacheStorage
 	maxShiftTTL uint8 // max shift of TTL in persent
-	requests    chan CacheReuest
+	requests    chan *CacheReuest
 	responses   chan CacheResponse
+	cancel      chan *CacheReuest
 }
 
 type CacheReuest struct {
@@ -46,7 +45,7 @@ type CacheResponse struct {
 }
 
 type CacheQueue struct {
-	requests     []CacheReuest
+	requests     []*CacheReuest
 	WarmingUp    bool
 	currentValue string
 }
@@ -61,8 +60,9 @@ type CacheItemOptions func(*CacheReuest)
 func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
 	c := Cache{
 		Storage:   storage,
-		requests:  make(chan CacheReuest),
+		requests:  make(chan *CacheReuest),
 		responses: make(chan CacheResponse),
+		cancel:    make(chan *CacheReuest),
 	}
 
 	for _, opt := range opts {
@@ -123,10 +123,11 @@ func (c *Cache) Cache(key string, generator func() (string, error), opts ...Cach
 		opt(&req)
 	}
 
-	c.requests <- req
+	c.requests <- &req
 
 	select {
 	case <-req.ctx.Done():
+		c.cancel <- &req
 		return "", req.ctx.Err()
 	case resp := <-response:
 		return resp.value, resp.err
@@ -191,7 +192,7 @@ func (c *Cache) requestHandler() {
 				continue
 			}
 
-			requestStorage[req.key] = CacheQueue{requests: []CacheReuest{req}}
+			requestStorage[req.key] = CacheQueue{requests: []*CacheReuest{req}}
 			go c.processRequest(req)
 
 		case resp := <-c.responses:
@@ -222,6 +223,27 @@ func (c *Cache) requestHandler() {
 			}
 
 			delete(requestStorage, resp.key)
+
+		case req := <-c.cancel:
+			reqQ, ok := requestStorage[req.key]
+
+			if !ok {
+				continue
+			}
+
+			if len(reqQ.requests) == 1 {
+				delete(requestStorage, req.key)
+				continue
+			}
+
+			for i, r := range reqQ.requests {
+				if r == req {
+					reqQ.requests = append(reqQ.requests[:i], reqQ.requests[i+1:]...)
+					requestStorage[req.key] = reqQ
+
+					break
+				}
+			}
 		}
 	}
 }
@@ -233,7 +255,7 @@ func (c *Cache) requestHandler() {
 // If the cache item options include a warm-up TTL, it checks if the current TTL of the key is less than or equal to the warm-up TTL.
 // If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
 // and returns the new value and any error encountered.
-func (c *Cache) processRequest(req CacheReuest) {
+func (c *Cache) processRequest(req *CacheReuest) {
 	var value string
 	var err error
 	var needWarmUp bool
@@ -299,7 +321,7 @@ func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(req CacheReuest) (string, error) {
+func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
 	value, err := req.generator()
 
 	if err != nil {
