@@ -198,9 +198,10 @@ func (c *Cache) requestHandler() {
 				requests:  []*CacheReuest{req},
 				cancelCtx: cancel,
 			}
-			// TODO: overwriting context in reference could be a problem
-			req.ctx = ctx
-			go c.processRequest(req)
+
+			reqCopy := *req
+			reqCopy.ctx = ctx
+			go c.processRequest(&reqCopy)
 
 		case resp := <-c.responses:
 
