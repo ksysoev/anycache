@@ -13,10 +13,10 @@ import (
 
 // CacheStorage
 type CacheStorage interface {
-	Get(string) (string, error)
-	Set(string, string, storage.CacheStorageItemOptions) error
-	TTL(string) (bool, time.Duration, error)
-	Del(string) (bool, error)
+	Get(context.Context, string) (string, error)
+	Set(context.Context, string, string, storage.CacheStorageItemOptions) error
+	TTL(context.Context, string) (bool, time.Duration, error)
+	Del(context.Context, string) (bool, error)
 }
 
 // Cache
@@ -47,6 +47,7 @@ type CacheResponse struct {
 type CacheQueue struct {
 	requests     []*CacheReuest
 	WarmingUp    bool
+	cancelCtx    context.CancelFunc
 	currentValue string
 }
 
@@ -192,7 +193,13 @@ func (c *Cache) requestHandler() {
 				continue
 			}
 
-			requestStorage[req.key] = CacheQueue{requests: []*CacheReuest{req}}
+			ctx, cancel := context.WithCancel(context.Background())
+			requestStorage[req.key] = CacheQueue{
+				requests:  []*CacheReuest{req},
+				cancelCtx: cancel,
+			}
+			// TODO: overwriting context in reference could be a problem
+			req.ctx = ctx
 			go c.processRequest(req)
 
 		case resp := <-c.responses:
@@ -232,6 +239,7 @@ func (c *Cache) requestHandler() {
 			}
 
 			if len(reqQ.requests) == 1 {
+				reqQ.cancelCtx()
 				delete(requestStorage, req.key)
 				continue
 			}
@@ -261,14 +269,14 @@ func (c *Cache) processRequest(req *CacheReuest) {
 	var needWarmUp bool
 	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
-		value, ttl, err = c.GetWithTTL(req.key)
+		value, ttl, err = c.GetWithTTL(req.ctx, req.key)
 
 		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
 		if err == nil && readyForWarmUp {
 			needWarmUp = true
 		}
 	} else {
-		value, err = c.Storage.Get(req.key)
+		value, err = c.Storage.Get(req.ctx, req.key)
 	}
 
 	if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
@@ -298,14 +306,14 @@ func (c *Cache) processRequest(req *CacheReuest) {
 	}
 }
 
-func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
-	value, err := c.Storage.Get(key)
+func (c *Cache) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
+	value, err := c.Storage.Get(ctx, key)
 
 	if err != nil {
 		return value, 0, err
 	}
 
-	hasTTL, ttl, err := c.Storage.TTL(key)
+	hasTTL, ttl, err := c.Storage.TTL(ctx, key)
 
 	if err != nil {
 		return value, 0, err
@@ -330,7 +338,7 @@ func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
 
 	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
-	err = c.Storage.Set(req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(req.ctx, req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
 
 	if err != nil {
 		return value, err

@@ -1,6 +1,7 @@
 package memcachestor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -29,9 +30,11 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
 	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
 
+	ctx := context.Background()
+
 	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageGetKey", Value: []byte("testValue")})
 
-	value, err := memcacheStore.Get("TestMemcacheCacheStorageGetKey")
+	value, err := memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -41,7 +44,7 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", value)
 	}
 
-	_, err = memcacheStore.Get("TestMemcacheCacheStorageGetKey1")
+	_, err = memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
@@ -52,7 +55,9 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
 	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
 
-	err := memcacheStore.Set("TestMemcacheCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
+	ctx := context.Background()
+
+	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -64,7 +69,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", item.Value)
 	}
 
-	err = memcacheStore.Set("TestMemcacheCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
+	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -81,9 +86,11 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
 	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
 
+	ctx := context.Background()
+
 	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey", Value: []byte("testValue"), Expiration: 1})
 
-	hasTTL, ttl, err := memcacheStore.TTL("TestMemcacheCacheStorageTTLKey")
+	hasTTL, ttl, err := memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -97,14 +104,14 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 		t.Errorf("Current implementation of memcache does not support meta commands to get TTL, so it should always return 0, but we got %v", ttl.Milliseconds())
 	}
 
-	_, _, err = memcacheStore.TTL("TestMemcacheCacheStorageTTLKey1")
+	_, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
 	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey2", Value: []byte("testValue")})
-	hasTTL, _, err = memcacheStore.TTL("TestMemcacheCacheStorageTTLKey2")
+	hasTTL, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey2")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -119,9 +126,11 @@ func TestMemcacheCacheStorageDel(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
 	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
 
+	ctx := context.Background()
+
 	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageDelKey", Value: []byte("testValue")})
 
-	memcacheStore.Del("TestMemcacheCacheStorageDelKey")
+	memcacheStore.Del(ctx, "TestMemcacheCacheStorageDelKey")
 
 	_, err := memcachedClient.Get("TestMemcacheCacheStorageDelKey")
 

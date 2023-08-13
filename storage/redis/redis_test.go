@@ -34,7 +34,7 @@ func TestRedisCacheStorageGet(t *testing.T) {
 
 	redisClient.Set(ctx, "TestRedisCacheStorageGetKey", "testValue", 0*time.Second)
 
-	value, err := redisStore.Get("TestRedisCacheStorageGetKey")
+	value, err := redisStore.Get(ctx, "TestRedisCacheStorageGetKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -44,7 +44,7 @@ func TestRedisCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", value)
 	}
 
-	_, err = redisStore.Get("TestRedisCacheStorageGetKey1")
+	_, err = redisStore.Get(ctx, "TestRedisCacheStorageGetKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
@@ -55,31 +55,33 @@ func TestRedisCacheStorageSet(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	err := redisStore.Set("TestRedisCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
+	ctx := context.Background()
+
+	err := redisStore.Set(ctx, "TestRedisCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	val, _ := redisClient.Get(context.Background(), "TestRedisCacheStorageSetKey").Result()
+	val, _ := redisClient.Get(ctx, "TestRedisCacheStorageSetKey").Result()
 
 	if val != "testValue" {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	err = redisStore.Set("TestRedisCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
+	err = redisStore.Set(ctx, "TestRedisCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	val1, _ := redisClient.Get(context.Background(), "TestRedisCacheStorageSetKey1").Result()
+	val1, _ := redisClient.Get(ctx, "TestRedisCacheStorageSetKey1").Result()
 
 	if val1 != "testValue" {
 		t.Errorf("Expected to get testValue, but got '%v'", val1)
 	}
 
-	ttl, _ := redisClient.TTL(context.Background(), "TestRedisCacheStorageSetKey1").Result()
+	ttl, _ := redisClient.TTL(ctx, "TestRedisCacheStorageSetKey1").Result()
 
 	if ttl.Milliseconds() <= 0 || ttl.Milliseconds() > 2000 {
 		t.Errorf("Expected to get valid TTL, but it has value %v", ttl.Milliseconds())
@@ -90,9 +92,11 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	redisClient.Set(context.Background(), "TestRedisCacheStorageTTLKey", "testValue", 1*time.Second)
+	ctx := context.Background()
 
-	hasTTL, ttl, err := redisStore.TTL("TestRedisCacheStorageTTLKey")
+	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey", "testValue", 1*time.Second)
+
+	hasTTL, ttl, err := redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -106,14 +110,14 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to get TTL as 1000 millisecond, but it has value %v microseconds", ttl.Milliseconds())
 	}
 
-	_, _, err = redisStore.TTL("TestRedisCacheStorageTTLKey1")
+	_, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey1")
 
 	if !errors.Is(err, storage.KeyNotExistError{}) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
-	redisClient.Set(context.Background(), "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)
-	hasTTL, _, err = redisStore.TTL("TestRedisCacheStorageTTLKey2")
+	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)
+	hasTTL, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey2")
 
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -128,11 +132,13 @@ func TestRedisCacheStorageDel(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
 	redisStore := NewRedisCacheStorage(redisClient)
 
-	redisClient.Set(context.Background(), "TestRedisCacheStorageDelKey", "testValue", 0*time.Second)
+	ctx := context.Background()
 
-	redisStore.Del("TestRedisCacheStorageDelKey")
+	redisClient.Set(ctx, "TestRedisCacheStorageDelKey", "testValue", 0*time.Second)
 
-	_, err := redisClient.Get(context.Background(), "TestRedisCacheStorageDelKey").Result()
+	redisStore.Del(ctx, "TestRedisCacheStorageDelKey")
+
+	_, err := redisClient.Get(ctx, "TestRedisCacheStorageDelKey").Result()
 
 	if !errors.Is(err, redis.Nil) {
 		t.Errorf("Expected to get error %v, but got '%v'", redis.Nil, err)
