@@ -30,7 +30,7 @@ type Cache struct {
 
 type CacheReuest struct {
 	key       string
-	generator func() (string, error)
+	generator CacheGenerator
 	TTL       time.Duration
 	WarmUpTTL time.Duration
 	response  chan CacheResponse
@@ -51,6 +51,7 @@ type CacheQueue struct {
 	currentValue string
 }
 
+type CacheGenerator func(ctx context.Context) (string, error)
 type CacheOptions func(*Cache)
 
 type CacheItemOptions func(*CacheReuest)
@@ -109,7 +110,7 @@ func WithCtx(ctx context.Context) CacheItemOptions {
 // The function takes an optional list of CacheItemOptions to customize the caching behavior.
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func (c *Cache) Cache(key string, generator func() (string, error), opts ...CacheItemOptions) (string, error) {
+func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
 	defer close(response)
 
@@ -143,9 +144,9 @@ func (c *Cache) Cache(key string, generator func() (string, error), opts ...Cach
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
-func (c *Cache) CacheStruct(key string, generator func() (any, error), result any, opts ...CacheItemOptions) error {
-	generatorWrapper := func() (string, error) {
-		val, err := generator()
+func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
+	generatorWrapper := func(ctx context.Context) (string, error) {
+		val, err := generator(ctx)
 
 		if err != nil {
 			return "", err
@@ -331,7 +332,7 @@ func (c *Cache) GetWithTTL(ctx context.Context, key string) (string, time.Durati
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
 func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
-	value, err := req.generator()
+	value, err := req.generator(req.ctx)
 
 	if err != nil {
 		return value, err
