@@ -1,6 +1,7 @@
 package anycache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -56,9 +57,9 @@ func getCacheStorages() map[string]CacheStorage {
 	}
 }
 
-func getGenerator(val string, err error) func() (string, error) {
+func getGenerator(val string, err error) CacheGenerator {
 
-	return func() (string, error) {
+	return func(ctx context.Context) (string, error) {
 		return val, err
 	}
 }
@@ -106,7 +107,7 @@ func TestCacheConcurrency(t *testing.T) {
 		results := make(chan string)
 
 		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func(ctx context.Context) (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue", nil
 			})
@@ -114,7 +115,7 @@ func TestCacheConcurrency(t *testing.T) {
 		}(&cache, results)
 
 		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache("TestCacheConcurrencyKey", func() (string, error) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func(ctx context.Context) (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue1", nil
 			})
@@ -154,7 +155,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	time.Sleep(time.Millisecond * 1001)
 
 	go func(c *Cache, ch chan string) {
-		val, err := c.Cache("TestCacheWarmingUpKey", func() (string, error) {
+		val, err := c.Cache("TestCacheWarmingUpKey", func(ctx context.Context) (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
@@ -166,7 +167,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	}(&cache, results)
 
 	go func(c *Cache, ch chan string) {
-		val, err := c.Cache("TestCacheWarmingUpKey", func() (string, error) {
+		val, err := c.Cache("TestCacheWarmingUpKey", func(ctx context.Context) (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
@@ -216,7 +217,7 @@ func TestCacheJSON(t *testing.T) {
 		}
 
 		// Define a generator function that returns the test value
-		generator := func() (any, error) {
+		generator := func(ctx context.Context) (any, error) {
 			return value, nil
 		}
 
@@ -251,6 +252,33 @@ func TestCacheJSON(t *testing.T) {
 	}
 }
 
+func TestCancelingRequest(t *testing.T) {
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage)
+
+		// Define a generator function that returns the test value
+		generator := func(ctx context.Context) (string, error) {
+			time.Sleep(time.Millisecond * 500)
+			return "testValue", nil
+		}
+
+		// Call the CacheJSON function to cache the test value
+		ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*100)
+
+		result, err := cache.Cache("TestCancelingRequestKey", generator, WithTTL(2*time.Second), WithCtx(ctx))
+
+		// Check that the function returned no errors
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("%v: Cache returned unexpected error: %v", storageName, err)
+		}
+
+		// Check that the result variable contains the expected value
+		if result != "" {
+			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
+		}
+	}
+}
+
 func TestPerfomance(t *testing.T) {
 	const (
 		TestRedisHost     = "localhost"
@@ -278,9 +306,7 @@ func TestPerfomance(t *testing.T) {
 				for i := 0; i < RequestsPerThread; i++ {
 					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
 
-					_, err := cache.Cache(key, func() (string, error) {
-						return fmt.Sprintf("value%d", rand.Intn(10)), nil
-					})
+					_, err := cache.Cache(key, getGenerator(fmt.Sprintf("value%d", rand.Intn(10)), nil))
 
 					if err != nil {
 						fmt.Printf("Error caching value for key %s: %v\n", key, err)

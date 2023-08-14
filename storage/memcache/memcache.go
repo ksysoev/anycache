@@ -1,6 +1,7 @@
 package memcachestor
 
 import (
+	"context"
 	"errors"
 	"time"
 
@@ -18,7 +19,7 @@ func NewMemcachedCacheStorage(memcache *memcache.Client) MemcachedCacheStorage {
 }
 
 // Get returns a value from Redis by key
-func (s MemcachedCacheStorage) Get(key string) (string, error) {
+func (s MemcachedCacheStorage) Get(ctx context.Context, key string) (string, error) {
 	var value string
 
 	item, err := s.memcache.Get(key)
@@ -36,7 +37,7 @@ func (s MemcachedCacheStorage) Get(key string) (string, error) {
 }
 
 // Set sets a value in Redis by key
-func (s MemcachedCacheStorage) Set(key string, value string, options storage.CacheStorageItemOptions) error {
+func (s MemcachedCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
 
@@ -57,7 +58,7 @@ func (s MemcachedCacheStorage) Set(key string, value string, options storage.Cac
 }
 
 // TTL returns a TTL of a key in Redis
-func (s MemcachedCacheStorage) TTL(key string) (bool, time.Duration, error) {
+func (s MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
 
@@ -79,7 +80,7 @@ func (s MemcachedCacheStorage) TTL(key string) (bool, time.Duration, error) {
 }
 
 // Del deletes a key from Redis
-func (s MemcachedCacheStorage) Del(key string) (bool, error) {
+func (s MemcachedCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
 
 	if err != nil {

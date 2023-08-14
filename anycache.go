@@ -2,6 +2,7 @@
 package anycache
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"math/rand"
@@ -10,30 +11,30 @@ import (
 	"github.com/ksysoev/anycache/storage"
 )
 
-const persentOfRandomTTL = 10.0
-
 // CacheStorage
 type CacheStorage interface {
-	Get(string) (string, error)
-	Set(string, string, storage.CacheStorageItemOptions) error
-	TTL(string) (bool, time.Duration, error)
-	Del(string) (bool, error)
+	Get(context.Context, string) (string, error)
+	Set(context.Context, string, string, storage.CacheStorageItemOptions) error
+	TTL(context.Context, string) (bool, time.Duration, error)
+	Del(context.Context, string) (bool, error)
 }
 
 // Cache
 type Cache struct {
 	Storage     CacheStorage
 	maxShiftTTL uint8 // max shift of TTL in persent
-	requests    chan CacheReuest
+	requests    chan *CacheReuest
 	responses   chan CacheResponse
+	cancel      chan *CacheReuest
 }
 
 type CacheReuest struct {
 	key       string
-	generator func() (string, error)
+	generator CacheGenerator
 	TTL       time.Duration
 	WarmUpTTL time.Duration
 	response  chan CacheResponse
+	ctx       context.Context
 }
 
 type CacheResponse struct {
@@ -44,11 +45,13 @@ type CacheResponse struct {
 }
 
 type CacheQueue struct {
-	requests     []CacheReuest
+	requests     []*CacheReuest
 	WarmingUp    bool
+	cancelCtx    context.CancelFunc
 	currentValue string
 }
 
+type CacheGenerator func(ctx context.Context) (string, error)
 type CacheOptions func(*Cache)
 
 type CacheItemOptions func(*CacheReuest)
@@ -59,8 +62,9 @@ type CacheItemOptions func(*CacheReuest)
 func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
 	c := Cache{
 		Storage:   storage,
-		requests:  make(chan CacheReuest),
+		requests:  make(chan *CacheReuest),
 		responses: make(chan CacheResponse),
+		cancel:    make(chan *CacheReuest),
 	}
 
 	for _, opt := range opts {
@@ -93,6 +97,12 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	}
 }
 
+func WithCtx(ctx context.Context) CacheItemOptions {
+	return func(req *CacheReuest) {
+		req.ctx = ctx
+	}
+}
+
 // Cache caches the result of the generator function for the given key.
 // If the key already exists in the cache, the cached value is returned.
 // Otherwise, the generator function is called to generate a new value,
@@ -100,25 +110,30 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 // The function takes an optional list of CacheItemOptions to customize the caching behavior.
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func (c *Cache) Cache(key string, generator func() (string, error), opts ...CacheItemOptions) (string, error) {
+func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
+	defer close(response)
 
 	req := CacheReuest{
 		key:       key,
 		generator: generator,
 		response:  response,
+		ctx:       context.Background(),
 	}
 
 	for _, opt := range opts {
 		opt(&req)
 	}
 
-	c.requests <- req
+	c.requests <- &req
 
-	resp := <-response
-	close(response)
-
-	return resp.value, resp.err
+	select {
+	case <-req.ctx.Done():
+		c.cancel <- &req
+		return "", req.ctx.Err()
+	case resp := <-response:
+		return resp.value, resp.err
+	}
 }
 
 // CacheStruct caches the result of a function that returns a struct.
@@ -129,9 +144,9 @@ func (c *Cache) Cache(key string, generator func() (string, error), opts ...Cach
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
-func (c *Cache) CacheStruct(key string, generator func() (any, error), result any, opts ...CacheItemOptions) error {
-	generatorWrapper := func() (string, error) {
-		val, err := generator()
+func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
+	generatorWrapper := func(ctx context.Context) (string, error) {
+		val, err := generator(ctx)
 
 		if err != nil {
 			return "", err
@@ -179,8 +194,15 @@ func (c *Cache) requestHandler() {
 				continue
 			}
 
-			requestStorage[req.key] = CacheQueue{requests: []CacheReuest{req}}
-			go c.processRequest(req)
+			ctx, cancel := context.WithCancel(context.Background())
+			requestStorage[req.key] = CacheQueue{
+				requests:  []*CacheReuest{req},
+				cancelCtx: cancel,
+			}
+
+			reqCopy := *req
+			reqCopy.ctx = ctx
+			go c.processRequest(&reqCopy)
 
 		case resp := <-c.responses:
 
@@ -210,6 +232,28 @@ func (c *Cache) requestHandler() {
 			}
 
 			delete(requestStorage, resp.key)
+
+		case req := <-c.cancel:
+			reqQ, ok := requestStorage[req.key]
+
+			if !ok {
+				continue
+			}
+
+			if len(reqQ.requests) == 1 {
+				reqQ.cancelCtx()
+				delete(requestStorage, req.key)
+				continue
+			}
+
+			for i, r := range reqQ.requests {
+				if r == req {
+					reqQ.requests = append(reqQ.requests[:i], reqQ.requests[i+1:]...)
+					requestStorage[req.key] = reqQ
+
+					break
+				}
+			}
 		}
 	}
 }
@@ -221,20 +265,20 @@ func (c *Cache) requestHandler() {
 // If the cache item options include a warm-up TTL, it checks if the current TTL of the key is less than or equal to the warm-up TTL.
 // If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
 // and returns the new value and any error encountered.
-func (c *Cache) processRequest(req CacheReuest) {
+func (c *Cache) processRequest(req *CacheReuest) {
 	var value string
 	var err error
 	var needWarmUp bool
 	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
-		value, ttl, err = c.GetWithTTL(req.key)
+		value, ttl, err = c.GetWithTTL(req.ctx, req.key)
 
 		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
 		if err == nil && readyForWarmUp {
 			needWarmUp = true
 		}
 	} else {
-		value, err = c.Storage.Get(req.key)
+		value, err = c.Storage.Get(req.ctx, req.key)
 	}
 
 	if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
@@ -264,14 +308,14 @@ func (c *Cache) processRequest(req CacheReuest) {
 	}
 }
 
-func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
-	value, err := c.Storage.Get(key)
+func (c *Cache) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
+	value, err := c.Storage.Get(ctx, key)
 
 	if err != nil {
 		return value, 0, err
 	}
 
-	hasTTL, ttl, err := c.Storage.TTL(key)
+	hasTTL, ttl, err := c.Storage.TTL(ctx, key)
 
 	if err != nil {
 		return value, 0, err
@@ -287,8 +331,8 @@ func (c *Cache) GetWithTTL(key string) (string, time.Duration, error) {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(req CacheReuest) (string, error) {
-	value, err := req.generator()
+func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
+	value, err := req.generator(req.ctx)
 
 	if err != nil {
 		return value, err
@@ -296,7 +340,7 @@ func (c *Cache) generateAndSet(req CacheReuest) (string, error) {
 
 	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
-	err = c.Storage.Set(req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(req.ctx, req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
 
 	if err != nil {
 		return value, err

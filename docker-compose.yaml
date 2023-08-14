@@ -6,7 +6,7 @@ services:
     volumes:
       - .:/go/src/app
     working_dir: /go/src/app
-    command: go test -v ./...
+    command: go test -race -v ./...
     environment:
       - TEST_REDIS_HOST=redis
       - TEST_REDIS_PORT=6379
