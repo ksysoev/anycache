@@ -14,12 +14,12 @@ type MemcachedCacheStorage struct {
 }
 
 // NewRedisCacheStorage creates a new RedisCacheStorage
-func NewMemcachedCacheStorage(memcache *memcache.Client) MemcachedCacheStorage {
-	return MemcachedCacheStorage{memcache}
+func NewMemcachedCacheStorage(memcache *memcache.Client) *MemcachedCacheStorage {
+	return &MemcachedCacheStorage{memcache}
 }
 
 // Get returns a value from Redis by key
-func (s MemcachedCacheStorage) Get(ctx context.Context, key string) (string, error) {
+func (s *MemcachedCacheStorage) Get(ctx context.Context, key string) (string, error) {
 	var value string
 
 	item, err := s.memcache.Get(key)
@@ -37,7 +37,7 @@ func (s MemcachedCacheStorage) Get(ctx context.Context, key string) (string, err
 }
 
 // Set sets a value in Redis by key
-func (s MemcachedCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
+func (s *MemcachedCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
 
@@ -58,7 +58,7 @@ func (s MemcachedCacheStorage) Set(ctx context.Context, key string, value string
 }
 
 // TTL returns a TTL of a key in Redis
-func (s MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+func (s *MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
 
@@ -80,7 +80,7 @@ func (s MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time.
 }
 
 // Del deletes a key from Redis
-func (s MemcachedCacheStorage) Del(ctx context.Context, key string) (bool, error) {
+func (s *MemcachedCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
 
 	if err != nil {
@@ -88,4 +88,14 @@ func (s MemcachedCacheStorage) Del(ctx context.Context, key string) (bool, error
 	}
 
 	return true, nil
+}
+
+func (s *MemcachedCacheStorage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
+	value, err := s.Get(ctx, key)
+
+	if err != nil {
+		return value, 0, err
+	}
+
+	return value, 0, nil
 }

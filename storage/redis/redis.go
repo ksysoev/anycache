@@ -14,12 +14,12 @@ type RedisCacheStorage struct {
 }
 
 // NewRedisCacheStorage creates a new RedisCacheStorage
-func NewRedisCacheStorage(redisDB *redis.Client) RedisCacheStorage {
-	return RedisCacheStorage{redisDB: redisDB}
+func NewRedisCacheStorage(redisDB *redis.Client) *RedisCacheStorage {
+	return &RedisCacheStorage{redisDB: redisDB}
 }
 
 // Get returns a value from Redis by key
-func (s RedisCacheStorage) Get(ctx context.Context, key string) (string, error) {
+func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error) {
 	var value string
 
 	item, err := s.redisDB.Get(ctx, key).Result()
@@ -37,7 +37,7 @@ func (s RedisCacheStorage) Get(ctx context.Context, key string) (string, error) 
 }
 
 // Set sets a value in Redis by key
-func (s RedisCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
+func (s *RedisCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.redisDB.Set(ctx, key, value, options.TTL).Err()
 
@@ -58,7 +58,7 @@ func (s RedisCacheStorage) Set(ctx context.Context, key string, value string, op
 }
 
 // TTL returns a TTL of a key in Redis
-func (s RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 	hasTTL := false
 	item, err := s.redisDB.PTTL(ctx, key).Result()
@@ -83,7 +83,7 @@ func (s RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Dura
 }
 
 // Del deletes a key from Redis
-func (s RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
+func (s *RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 	deleted, err := s.redisDB.Del(ctx, key).Result()
 
 	if err != nil {
@@ -93,4 +93,24 @@ func (s RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 	isDeleted := deleted > 0
 
 	return isDeleted, nil
+}
+
+func (s *RedisCacheStorage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
+	value, err := s.Get(ctx, key)
+
+	if err != nil {
+		return value, 0, err
+	}
+
+	hasTTL, ttl, err := s.TTL(ctx, key)
+
+	if err != nil {
+		return value, 0, err
+	}
+
+	if !hasTTL {
+		return value, 0, nil
+	}
+
+	return value, ttl, nil
 }

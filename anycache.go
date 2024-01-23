@@ -17,6 +17,7 @@ type CacheStorage interface {
 	Set(context.Context, string, string, storage.CacheStorageItemOptions) error
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
+	GetWithTTL(context.Context, string) (string, time.Duration, error)
 }
 
 // Cache
@@ -271,7 +272,7 @@ func (c *Cache) processRequest(req *CacheReuest) {
 	var needWarmUp bool
 	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
-		value, ttl, err = c.GetWithTTL(req.ctx, req.key)
+		value, ttl, err = c.Storage.GetWithTTL(req.ctx, req.key)
 
 		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
 		if err == nil && readyForWarmUp {
@@ -306,26 +307,6 @@ func (c *Cache) processRequest(req *CacheReuest) {
 
 		c.responses <- cacheResp
 	}
-}
-
-func (c *Cache) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
-	value, err := c.Storage.Get(ctx, key)
-
-	if err != nil {
-		return value, 0, err
-	}
-
-	hasTTL, ttl, err := c.Storage.TTL(ctx, key)
-
-	if err != nil {
-		return value, 0, err
-	}
-
-	if !hasTTL {
-		return value, 0, nil
-	}
-
-	return value, ttl, nil
 }
 
 // generateAndSet generates a value using the provided generator function,
