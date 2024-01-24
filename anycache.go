@@ -113,8 +113,6 @@ func WithCtx(ctx context.Context) CacheItemOptions {
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
-	defer close(response)
-
 	req := CacheReuest{
 		key:       key,
 		generator: generator,
@@ -222,6 +220,7 @@ func (c *Cache) requestHandler() {
 
 				for _, req := range processNow {
 					req.response <- resp
+					close(req.response)
 				}
 
 				continue
@@ -240,6 +239,8 @@ func (c *Cache) requestHandler() {
 			if !ok {
 				continue
 			}
+
+			close(req.response)
 
 			if len(reqQ.requests) == 1 {
 				reqQ.cancelCtx()
