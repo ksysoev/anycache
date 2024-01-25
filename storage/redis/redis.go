@@ -132,3 +132,8 @@ func (s *RedisCacheStorage) GetWithTTL(ctx context.Context, key string) (string,
 
 	return value, ttl, nil
 }
+
+// Close closes the Redis cache storage connection.
+func (s *RedisCacheStorage) Close() error {
+	return s.redisDB.Close()
+}

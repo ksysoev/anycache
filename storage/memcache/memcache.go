@@ -115,3 +115,8 @@ func (s *MemcachedCacheStorage) GetWithTTL(ctx context.Context, key string) (str
 
 	return value, 0, nil
 }
+
+// Close closes the connection to the Memcached server.
+func (s *MemcachedCacheStorage) Close() error {
+	return s.memcache.Close()
+}

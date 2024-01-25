@@ -18,11 +18,14 @@ type CacheStorage interface {
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
 	GetWithTTL(context.Context, string) (string, time.Duration, error)
+	Close() error
 }
 
 // Cache
 type Cache struct {
 	Storage     CacheStorage
+	ctx         context.Context
+	cancelCtx   context.CancelFunc
 	maxShiftTTL uint8 // max shift of TTL in persent
 	requests    chan *CacheReuest
 	responses   chan CacheResponse
@@ -61,8 +64,12 @@ type CacheItemOptions func(*CacheReuest)
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
 func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
+	ctx, cancelCtx := context.WithCancel(context.Background())
+
 	c := Cache{
 		Storage:   storage,
+		ctx:       ctx,
+		cancelCtx: cancelCtx,
 		requests:  make(chan *CacheReuest),
 		responses: make(chan CacheResponse),
 		cancel:    make(chan *CacheReuest),
@@ -256,6 +263,19 @@ func (c *Cache) requestHandler() {
 					break
 				}
 			}
+		case <-c.ctx.Done():
+			for _, reqQ := range requestStorage {
+				reqQ.cancelCtx()
+				for _, req := range reqQ.requests {
+					req.response <- CacheResponse{
+						key:   req.key,
+						value: "",
+						err:   c.ctx.Err(),
+					}
+					close(req.response)
+				}
+			}
+			return
 		}
 	}
 }
@@ -344,4 +364,11 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 
 	randomizedTTL := ttl.Nanoseconds() + randomizedShift
 	return time.Duration(randomizedTTL)
+}
+
+// Close closes the Cache instance.
+// It returns an error if any occurred.
+func (c *Cache) Close() error {
+	c.cancelCtx()
+	return c.Storage.Close()
 }
