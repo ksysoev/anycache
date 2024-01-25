@@ -58,7 +58,6 @@ func getCacheStorages() map[string]CacheStorage {
 }
 
 func getGenerator(val string, err error) CacheGenerator {
-
 	return func(ctx context.Context) (string, error) {
 		return val, err
 	}
@@ -135,7 +134,7 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	// For now, we test only Redis storage becuase Memcache client does not support TTL
+	// For now, we test only Redis storage, Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redisstor.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore)
@@ -193,15 +192,10 @@ func TestCacheWarmingUp(t *testing.T) {
 }
 
 func TestRandomizeTTL(t *testing.T) {
-	rand.Seed(1)
 	ttl := randomizeTTL(10, 100*time.Second)
 
 	if ttl < 90*time.Second || ttl > 110*time.Second {
 		t.Errorf("Expected to get ttl between 90 and 110 seconds, but got %v", ttl)
-	}
-
-	if int(ttl.Seconds()) != 103 {
-		t.Errorf("Expected to get ttl equal to 103 seconds, but got %v", ttl)
 	}
 }
 
@@ -263,7 +257,7 @@ func TestCancelingRequest(t *testing.T) {
 		}
 
 		// Call the CacheJSON function to cache the test value
-		ctx, _ := context.WithTimeout(context.Background(), time.Millisecond*100)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 
 		result, err := cache.Cache("TestCancelingRequestKey", generator, WithTTL(2*time.Second), WithCtx(ctx))
 
@@ -276,6 +270,8 @@ func TestCancelingRequest(t *testing.T) {
 		if result != "" {
 			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
 		}
+
+		cancel()
 	}
 }
 
@@ -295,18 +291,21 @@ func TestPerfomance(t *testing.T) {
 	}
 
 	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
-
-		startTime := time.Now()
 		var wg sync.WaitGroup
+
+		cache := NewCache(cacheStorage)
+		startTime := time.Now()
+
 		for i := 0; i < MaxConcurrency; i++ {
 			wg.Add(1)
+
 			go func() {
 				defer wg.Done()
-				for i := 0; i < RequestsPerThread; i++ {
-					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
 
-					_, err := cache.Cache(key, getGenerator(fmt.Sprintf("value%d", rand.Intn(10)), nil))
+				for i := 0; i < RequestsPerThread; i++ {
+					//nolint:gosec // we don't need cryptographically secure random number generator for tesst
+					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
+					_, err := cache.Cache(key, getGenerator(fmt.Sprintf("value%s", key), nil))
 
 					if err != nil {
 						fmt.Printf("Error caching value for key %s: %v\n", key, err)

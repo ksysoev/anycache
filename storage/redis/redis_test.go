@@ -136,9 +136,12 @@ func TestRedisCacheStorageDel(t *testing.T) {
 
 	redisClient.Set(ctx, "TestRedisCacheStorageDelKey", "testValue", 0*time.Second)
 
-	redisStore.Del(ctx, "TestRedisCacheStorageDelKey")
+	_, err := redisStore.Del(ctx, "TestRedisCacheStorageDelKey")
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
-	_, err := redisClient.Get(ctx, "TestRedisCacheStorageDelKey").Result()
+	_, err = redisClient.Get(ctx, "TestRedisCacheStorageDelKey").Result()
 
 	if !errors.Is(err, redis.Nil) {
 		t.Errorf("Expected to get error %v, but got '%v'", redis.Nil, err)

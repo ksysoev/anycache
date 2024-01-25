@@ -23,20 +23,17 @@ func NewRedisCacheStorage(redisDB *redis.Client) *RedisCacheStorage {
 // If the key does not exist, it returns an empty string and a KeyNotExistError.
 // If any other error occurs during the operation, it returns an empty string and the error.
 func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error) {
-	var value string
-
 	item, err := s.redisDB.Get(ctx, key).Result()
 
 	if errors.Is(err, redis.Nil) {
-		return value, storage.KeyNotExistError{}
+		return "", storage.KeyNotExistError{}
 	}
 
 	if err != nil {
-		return value, err
+		return "", err
 	}
 
-	value = item
-	return value, nil
+	return item, nil
 }
 
 // Set stores a value associated with the provided key in the Redis cache storage.
@@ -44,7 +41,7 @@ func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error)
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
 // If an error occurs during the operation, it returns the error.
-func (s *RedisCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
+func (s *RedisCacheStorage) Set(ctx context.Context, key, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.redisDB.Set(ctx, key, value, options.TTL).Err()
 
@@ -70,6 +67,7 @@ func (s *RedisCacheStorage) Set(ctx context.Context, key string, value string, o
 // If any other error occurs during the operation, it returns false and the error.
 func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
+
 	hasTTL := false
 	item, err := s.redisDB.PTTL(ctx, key).Result()
 

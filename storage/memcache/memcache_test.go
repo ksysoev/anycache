@@ -32,7 +32,10 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 
 	ctx := context.Background()
 
-	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageGetKey", Value: []byte("testValue")})
+	err := memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageGetKey", Value: []byte("testValue")})
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
 	value, err := memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey")
 
@@ -88,7 +91,10 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 	ctx := context.Background()
 
-	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey", Value: []byte("testValue"), Expiration: 1})
+	err := memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey", Value: []byte("testValue"), Expiration: 1})
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
 	hasTTL, ttl, err := memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey")
 
@@ -110,7 +116,11 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
 	}
 
-	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey2", Value: []byte("testValue")})
+	err = memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey2", Value: []byte("testValue")})
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
 	hasTTL, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey2")
 
 	if err != nil {
@@ -128,12 +138,17 @@ func TestMemcacheCacheStorageDel(t *testing.T) {
 
 	ctx := context.Background()
 
-	memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageDelKey", Value: []byte("testValue")})
+	err := memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageDelKey", Value: []byte("testValue")})
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
-	memcacheStore.Del(ctx, "TestMemcacheCacheStorageDelKey")
+	_, err = memcacheStore.Del(ctx, "TestMemcacheCacheStorageDelKey")
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
-	_, err := memcachedClient.Get("TestMemcacheCacheStorageDelKey")
-
+	_, err = memcachedClient.Get("TestMemcacheCacheStorageDelKey")
 	if !errors.Is(err, memcache.ErrCacheMiss) {
 		t.Errorf("Expected to get error %v, but got '%v'", memcache.ErrCacheMiss, err)
 	}

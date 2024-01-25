@@ -14,36 +14,33 @@ type MemcachedCacheStorage struct {
 }
 
 // NewRedisCacheStorage creates a new RedisCacheStorage
-func NewMemcachedCacheStorage(memcache *memcache.Client) *MemcachedCacheStorage {
-	return &MemcachedCacheStorage{memcache}
+func NewMemcachedCacheStorage(client *memcache.Client) *MemcachedCacheStorage {
+	return &MemcachedCacheStorage{client}
 }
 
 // Get retrieves the value associated with the provided key from the Memcached cache storage.
 // It returns the value as a string and an error if any occurred.
 // If the key does not exist, it returns an empty string and a KeyNotExistError.
 // If any other error occurs during the operation, it returns an empty string and the error.
-func (s *MemcachedCacheStorage) Get(ctx context.Context, key string) (string, error) {
-	var value string
-
+func (s *MemcachedCacheStorage) Get(_ context.Context, key string) (string, error) {
 	item, err := s.memcache.Get(key)
 
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return value, storage.KeyNotExistError{}
+		return "", storage.KeyNotExistError{}
 	}
 
 	if err != nil {
-		return value, err
+		return "", err
 	}
 
-	value = string(item.Value)
-	return value, nil
+	return string(item.Value), nil
 }
 
 // Set stores a value associated with the provided key in the Memcached cache storage.
 // It also accepts options which currently only includes TTL (time-to-live) for the key-value pair.
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
-func (s *MemcachedCacheStorage) Set(ctx context.Context, key string, value string, options storage.CacheStorageItemOptions) error {
+func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
 
@@ -68,10 +65,10 @@ func (s *MemcachedCacheStorage) Set(ctx context.Context, key string, value strin
 // If the key does not exist, it returns false, a zero duration, and a KeyNotExistError.
 // If the key exists but does not have an expiration, it returns false, a zero duration, and nil error.
 // If the key exists and has an expiration, it returns true, the TTL, and nil error.
-func (s *MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+func (s *MemcachedCacheStorage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
-	hasTTL := false
 
+	hasTTL := false
 	item, err := s.memcache.Get(key)
 
 	if errors.Is(err, memcache.ErrCacheMiss) {
@@ -92,7 +89,7 @@ func (s *MemcachedCacheStorage) TTL(ctx context.Context, key string) (bool, time
 // Del deletes the value associated with the provided key from the Memcached cache storage.
 // It returns a boolean indicating whether the deletion was successful, and an error if any occurred.
 // If the key does not exist or any other error occurs during the operation, it returns false and the error.
-func (s *MemcachedCacheStorage) Del(ctx context.Context, key string) (bool, error) {
+func (s *MemcachedCacheStorage) Del(_ context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
 
 	if err != nil {

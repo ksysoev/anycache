@@ -11,6 +11,10 @@ import (
 	"github.com/ksysoev/anycache/storage"
 )
 
+const (
+	HundredPercent = 100
+)
+
 // CacheStorage
 type CacheStorage interface {
 	Get(context.Context, string) (string, error)
@@ -26,33 +30,33 @@ type Cache struct {
 	Storage     CacheStorage
 	ctx         context.Context
 	cancelCtx   context.CancelFunc
-	maxShiftTTL uint8 // max shift of TTL in persent
 	requests    chan *CacheReuest
 	responses   chan CacheResponse
 	cancel      chan *CacheReuest
+	maxShiftTTL uint8 // max shift of TTL in persent
 }
 
 type CacheReuest struct {
-	key       string
 	generator CacheGenerator
+	ctx       context.Context
+	response  chan CacheResponse
+	key       string
 	TTL       time.Duration
 	WarmUpTTL time.Duration
-	response  chan CacheResponse
-	ctx       context.Context
 }
 
 type CacheResponse struct {
+	err       error
 	key       string
 	value     string
-	err       error
 	warmingUp bool
 }
 
 type CacheQueue struct {
-	requests     []*CacheReuest
-	WarmingUp    bool
 	cancelCtx    context.CancelFunc
 	currentValue string
+	requests     []*CacheReuest
+	WarmingUp    bool
 }
 
 type CacheGenerator func(ctx context.Context) (string, error)
@@ -63,11 +67,11 @@ type CacheItemOptions func(*CacheReuest)
 // NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
-func NewCache(storage CacheStorage, opts ...CacheOptions) Cache {
+func NewCache(store CacheStorage, opts ...CacheOptions) Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	c := Cache{
-		Storage:   storage,
+		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
 		requests:  make(chan *CacheReuest),
@@ -193,10 +197,13 @@ func (c *Cache) requestHandler() {
 						value: reqQ.currentValue,
 						err:   nil,
 					}
+
 					continue
 				}
+
 				reqQ.requests = append(reqQ.requests, req)
 				requestStorage[req.key] = reqQ
+
 				continue
 			}
 
@@ -208,10 +215,9 @@ func (c *Cache) requestHandler() {
 
 			reqCopy := *req
 			reqCopy.ctx = ctx
+
 			go c.processRequest(&reqCopy)
-
 		case resp := <-c.responses:
-
 			reqQ, ok := requestStorage[resp.key]
 
 			if !ok {
@@ -231,7 +237,6 @@ func (c *Cache) requestHandler() {
 				}
 
 				continue
-
 			}
 
 			for _, req := range reqQ.requests {
@@ -252,6 +257,7 @@ func (c *Cache) requestHandler() {
 			if len(reqQ.requests) == 1 {
 				reqQ.cancelCtx()
 				delete(requestStorage, req.key)
+
 				continue
 			}
 
@@ -266,6 +272,7 @@ func (c *Cache) requestHandler() {
 		case <-c.ctx.Done():
 			for _, reqQ := range requestStorage {
 				reqQ.cancelCtx()
+
 				for _, req := range reqQ.requests {
 					req.response <- CacheResponse{
 						key:   req.key,
@@ -275,6 +282,7 @@ func (c *Cache) requestHandler() {
 					close(req.response)
 				}
 			}
+
 			return
 		}
 	}
@@ -288,9 +296,12 @@ func (c *Cache) requestHandler() {
 // If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
 // and returns the new value and any error encountered.
 func (c *Cache) processRequest(req *CacheReuest) {
-	var value string
-	var err error
-	var needWarmUp bool
+	var (
+		value      string
+		err        error
+		needWarmUp bool
+	)
+
 	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
 		value, ttl, err = c.Storage.GetWithTTL(req.ctx, req.key)
@@ -359,10 +370,11 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 		return ttl
 	}
 
-	MaxShift := int64(ttl.Nanoseconds()) * int64(maxShiftTTL) / 100
-	randomizedShift := int64(float64(MaxShift) * (float64(rand.Intn(100)) - 50.0) / 100.0)
-
+	MaxShift := ttl.Nanoseconds() * int64(maxShiftTTL) / HundredPercent
+	//nolint:gosec // we don't need cryptographically secure random number generator here
+	randomizedShift := int64(float64(MaxShift) * (float64(rand.Intn(HundredPercent)) - HundredPercent/2) / HundredPercent)
 	randomizedTTL := ttl.Nanoseconds() + randomizedShift
+
 	return time.Duration(randomizedTTL)
 }
 
