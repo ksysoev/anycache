@@ -325,7 +325,11 @@ func (c *Cache) processRequest(req *CacheReuest) {
 		warmingUp: needWarmUp,
 	}
 
-	c.responses <- cacheResp
+	select {
+	case c.responses <- cacheResp:
+	case <-req.ctx.Done():
+		return
+	}
 
 	if needWarmUp {
 		newVal, err := c.generateAndSet(req)
@@ -337,7 +341,11 @@ func (c *Cache) processRequest(req *CacheReuest) {
 			warmingUp: false,
 		}
 
-		c.responses <- cacheResp
+		select {
+		case c.responses <- cacheResp:
+		case <-req.ctx.Done():
+			return
+		}
 	}
 }
 
