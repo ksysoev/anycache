@@ -295,6 +295,38 @@ func TestCancelingRequest(t *testing.T) {
 	}
 }
 
+func TestClosingOnRequest(t *testing.T) {
+	for storageName, cacheStorage := range getCacheStorages() {
+		cache := NewCache(cacheStorage)
+
+		// Define a generator function that returns the test value
+		generator := func(ctx context.Context) (string, error) {
+			time.Sleep(time.Second)
+			return "testValue", nil
+		}
+
+		go func() {
+			time.Sleep(time.Millisecond * 5)
+
+			if err := cache.Close(); err != nil {
+				t.Errorf("%v: Close returned an error: %v", storageName, err)
+			}
+		}()
+
+		result, err := cache.Cache("TestCancelingRequestKey", generator, WithTTL(2*time.Second))
+
+		// Check that the function returned no errors
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("%v: Cache returned unexpected error: %v", storageName, err)
+		}
+
+		// Check that the result variable contains the expected value
+		if result != "" {
+			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
+		}
+	}
+}
+
 func TestPerfomance(t *testing.T) {
 	const (
 		TestRedisHost     = "localhost"
