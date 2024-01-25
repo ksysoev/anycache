@@ -96,6 +96,10 @@ func TestCache(t *testing.T) {
 		if val != "" {
 			t.Errorf("%v: Expected to get empty string, but got '%v'", storageName, val)
 		}
+
+		if err := cache.Close(); err != nil {
+			t.Errorf("%v: Close returned an error: %v", storageName, err)
+		}
 	}
 }
 
@@ -129,6 +133,10 @@ func TestCacheConcurrency(t *testing.T) {
 
 		if val1 != val2 {
 			t.Errorf("%v: Expected to get same result for concurent requests, but got '%v' and '%v", storageName, val1, val2)
+		}
+
+		if err := cache.Close(); err != nil {
+			t.Errorf("%v: Close returned an error: %v", storageName, err)
 		}
 	}
 }
@@ -189,6 +197,10 @@ func TestCacheWarmingUp(t *testing.T) {
 	if !(val1 == "newTestValue" || val2 == "newTestValue") {
 		t.Errorf("Expected to get at least one new value, but got '%v' and '%v'", val1, val2)
 	}
+
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close returned an error: %v", err)
+	}
 }
 
 func TestRandomizeTTL(t *testing.T) {
@@ -243,6 +255,10 @@ func TestCacheJSON(t *testing.T) {
 		if result["foo"] != "bar" || result["baz"] != "qux" {
 			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
 		}
+
+		if err := cache.Close(); err != nil {
+			t.Errorf("%v: Close returned an error: %v", storageName, err)
+		}
 	}
 }
 
@@ -272,6 +288,10 @@ func TestCancelingRequest(t *testing.T) {
 		}
 
 		cancel()
+
+		if err := cache.Close(); err != nil {
+			t.Errorf("%v: Close returned an error: %v", storageName, err)
+		}
 	}
 }
 
@@ -323,5 +343,9 @@ func TestPerfomance(t *testing.T) {
 		}
 
 		fmt.Printf("Total time of execution for %s: %v\n", storageName, time.Since(startTime))
+
+		if err := cache.Close(); err != nil {
+			t.Errorf("%v: Close returned an error: %v", storageName, err)
+		}
 	}
 }
