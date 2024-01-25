@@ -47,6 +47,7 @@ func main() {
 
     // Creates anycache with 10% TTL randomization
     cache := anycache.NewCache(redisStorage, WithTTLRandomization(10))
+    defer cache.Close()
 
     generator := func() (string, error) {
         randomNumber := rand.Intn(100)
