@@ -58,7 +58,7 @@ func getCacheStorages() map[string]CacheStorage {
 }
 
 func getGenerator(val string, err error) CacheGenerator {
-	return func(ctx context.Context) (string, error) {
+	return func(_ context.Context) (string, error) {
 		return val, err
 	}
 }
@@ -110,7 +110,7 @@ func TestCacheConcurrency(t *testing.T) {
 		results := make(chan string)
 
 		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache("TestCacheConcurrencyKey", func(ctx context.Context) (string, error) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue", nil
 			})
@@ -118,7 +118,7 @@ func TestCacheConcurrency(t *testing.T) {
 		}(&cache, results)
 
 		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache("TestCacheConcurrencyKey", func(ctx context.Context) (string, error) {
+			val, _ := c.Cache("TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
 				time.Sleep(time.Millisecond)
 				return "testValue1", nil
 			})
@@ -162,7 +162,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	time.Sleep(time.Millisecond * 1001)
 
 	go func(c *Cache, ch chan string) {
-		val, err := c.Cache("TestCacheWarmingUpKey", func(ctx context.Context) (string, error) {
+		val, err := c.Cache("TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
@@ -174,7 +174,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	}(&cache, results)
 
 	go func(c *Cache, ch chan string) {
-		val, err := c.Cache("TestCacheWarmingUpKey", func(ctx context.Context) (string, error) {
+		val, err := c.Cache("TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
@@ -190,11 +190,11 @@ func TestCacheWarmingUp(t *testing.T) {
 	val2 := <-results
 
 	// First request
-	if !(val1 == "testValue" || val2 == "testValue") {
+	if val1 != "testValue" && val2 != "testValue" {
 		t.Errorf("Expected to get at least one testValue as a result, but got '%v' and %v", val1, val2)
 	}
 
-	if !(val1 == "newTestValue" || val2 == "newTestValue") {
+	if val1 != "newTestValue" && val2 != "newTestValue" {
 		t.Errorf("Expected to get at least one new value, but got '%v' and '%v'", val1, val2)
 	}
 
@@ -223,7 +223,7 @@ func TestCacheJSON(t *testing.T) {
 		}
 
 		// Define a generator function that returns the test value
-		generator := func(ctx context.Context) (any, error) {
+		generator := func(_ context.Context) (any, error) {
 			return value, nil
 		}
 
@@ -267,7 +267,7 @@ func TestCancelingRequest(t *testing.T) {
 		cache := NewCache(cacheStorage)
 
 		// Define a generator function that returns the test value
-		generator := func(ctx context.Context) (string, error) {
+		generator := func(_ context.Context) (string, error) {
 			time.Sleep(time.Millisecond * 500)
 			return "testValue", nil
 		}
@@ -300,7 +300,7 @@ func TestClosingOnRequest(t *testing.T) {
 		cache := NewCache(cacheStorage)
 
 		// Define a generator function that returns the test value
-		generator := func(ctx context.Context) (string, error) {
+		generator := func(_ context.Context) (string, error) {
 			time.Sleep(time.Second)
 			return "testValue", nil
 		}
