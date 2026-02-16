@@ -21,7 +21,7 @@ jobs:
         with:
           redis-version: ${{ matrix.redis-version }}
       - name: Start Memcached
-        uses: niden/actions-memcached@v7
+        uses: niden/actions-memcached@v8
       - name: Display Go version
         run: go version
       - name: Code Lint
