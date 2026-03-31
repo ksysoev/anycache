@@ -38,7 +38,6 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 	}
 
 	value, err := memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey")
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -61,7 +60,6 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 	ctx := context.Background()
 
 	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -73,7 +71,6 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 	}
 
 	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -97,7 +94,6 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 	}
 
 	hasTTL, ttl, err := memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey")
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -122,7 +118,6 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 	}
 
 	hasTTL, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey2")
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}

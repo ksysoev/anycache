@@ -43,7 +43,6 @@ func (s *MemcachedCacheStorage) Get(_ context.Context, key string) (string, erro
 func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
-
 		if err != nil {
 			return err
 		}
@@ -52,7 +51,6 @@ func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, option
 	}
 
 	err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value)})
-
 	if err != nil {
 		return err
 	}
@@ -91,7 +89,6 @@ func (s *MemcachedCacheStorage) TTL(_ context.Context, key string) (bool, time.D
 // If the key does not exist or any other error occurs during the operation, it returns false and the error.
 func (s *MemcachedCacheStorage) Del(_ context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
-
 	if err != nil {
 		return false, err
 	}
@@ -105,7 +102,6 @@ func (s *MemcachedCacheStorage) Del(_ context.Context, key string) (bool, error)
 // If the key does not exist or any other error occurs during the operation, it returns the error and the TTL as 0.
 func (s *MemcachedCacheStorage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
 	value, err := s.Get(ctx, key)
-
 	if err != nil {
 		return value, 0, err
 	}

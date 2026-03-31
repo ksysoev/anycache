@@ -44,7 +44,6 @@ func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error)
 func (s *RedisCacheStorage) Set(ctx context.Context, key, value string, options storage.CacheStorageItemOptions) error {
 	if options.TTL.Nanoseconds() > 0 {
 		err := s.redisDB.Set(ctx, key, value, options.TTL).Err()
-
 		if err != nil {
 			return err
 		}
@@ -53,7 +52,6 @@ func (s *RedisCacheStorage) Set(ctx context.Context, key, value string, options 
 	}
 
 	err := s.redisDB.Set(ctx, key, value, 0).Err()
-
 	if err != nil {
 		return err
 	}
@@ -69,8 +67,8 @@ func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Dur
 	var ttl time.Duration
 
 	hasTTL := false
-	item, err := s.redisDB.PTTL(ctx, key).Result()
 
+	item, err := s.redisDB.PTTL(ctx, key).Result()
 	if err != nil {
 		return hasTTL, ttl, err
 	}
@@ -96,7 +94,6 @@ func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Dur
 // If any other error occurs during the operation, it returns false and the error.
 func (s *RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 	deleted, err := s.redisDB.Del(ctx, key).Result()
-
 	if err != nil {
 		return false, err
 	}
@@ -113,13 +110,11 @@ func (s *RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 // If the key exists and has an expiration, it returns the value, the TTL, and nil error.
 func (s *RedisCacheStorage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
 	value, err := s.Get(ctx, key)
-
 	if err != nil {
 		return value, 0, err
 	}
 
 	hasTTL, ttl, err := s.TTL(ctx, key)
-
 	if err != nil {
 		return value, 0, err
 	}

@@ -157,13 +157,11 @@ func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOpt
 func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
 	generatorWrapper := func(ctx context.Context) (string, error) {
 		val, err := generator(ctx)
-
 		if err != nil {
 			return "", err
 		}
 
 		jsonVal, err := json.Marshal(val)
-
 		if err != nil {
 			return "", err
 		}
@@ -172,7 +170,6 @@ func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, er
 	}
 
 	val, err := c.Cache(key, generatorWrapper, opts...)
-
 	if err != nil {
 		return err
 	}
@@ -207,7 +204,7 @@ func (c *Cache) requestHandler() {
 				continue
 			}
 
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in CacheQueue.cancelCtx and called on cleanup
 			requestStorage[req.key] = CacheQueue{
 				requests:  []*CacheReuest{req},
 				cancelCtx: cancel,
@@ -233,6 +230,7 @@ func (c *Cache) requestHandler() {
 
 				for _, req := range processNow {
 					req.response <- resp
+
 					close(req.response)
 				}
 
@@ -279,6 +277,7 @@ func (c *Cache) requestHandler() {
 						value: "",
 						err:   c.ctx.Err(),
 					}
+
 					close(req.response)
 				}
 			}
@@ -304,6 +303,7 @@ func (c *Cache) processRequest(req *CacheReuest) {
 
 	if req.WarmUpTTL.Nanoseconds() > 0 {
 		var ttl time.Duration
+
 		value, ttl, err = c.Storage.GetWithTTL(req.ctx, req.key)
 
 		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
@@ -354,7 +354,6 @@ func (c *Cache) processRequest(req *CacheReuest) {
 // and returns the generated value and any error encountered.
 func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
 	value, err := req.generator(req.ctx)
-
 	if err != nil {
 		return value, err
 	}
@@ -362,7 +361,6 @@ func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
 	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
 	err = c.Storage.Set(req.ctx, req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
-
 	if err != nil {
 		return value, err
 	}

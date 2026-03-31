@@ -35,7 +35,6 @@ func TestRedisCacheStorageGet(t *testing.T) {
 	redisClient.Set(ctx, "TestRedisCacheStorageGetKey", "testValue", 0*time.Second)
 
 	value, err := redisStore.Get(ctx, "TestRedisCacheStorageGetKey")
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -58,7 +57,6 @@ func TestRedisCacheStorageSet(t *testing.T) {
 	ctx := context.Background()
 
 	err := redisStore.Set(ctx, "TestRedisCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -70,7 +68,6 @@ func TestRedisCacheStorageSet(t *testing.T) {
 	}
 
 	err = redisStore.Set(ctx, "TestRedisCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -97,7 +94,6 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey", "testValue", 1*time.Second)
 
 	hasTTL, ttl, err := redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey")
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -117,8 +113,8 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 	}
 
 	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)
-	hasTTL, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey2")
 
+	hasTTL, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey2")
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}

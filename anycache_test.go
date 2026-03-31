@@ -68,7 +68,6 @@ func TestCache(t *testing.T) {
 		cache := NewCache(cacheStorage)
 
 		val, err := cache.Cache("TestCacheKey", getGenerator("testValue", nil))
-
 		if err != nil {
 			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
 		}
@@ -78,7 +77,6 @@ func TestCache(t *testing.T) {
 		}
 
 		val, err = cache.Cache("TestCacheKey", getGenerator("testValue1", nil))
-
 		if err != nil {
 			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
 		}
@@ -148,7 +146,6 @@ func TestCacheWarmingUp(t *testing.T) {
 	cache := NewCache(cacheStore)
 
 	val, err := cache.Cache("TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -166,10 +163,10 @@ func TestCacheWarmingUp(t *testing.T) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-
 		if err != nil {
 			t.Errorf("Expected to get no error, but got %v", err)
 		}
+
 		ch <- val
 	}(&cache, results)
 
@@ -178,7 +175,6 @@ func TestCacheWarmingUp(t *testing.T) {
 			time.Sleep(time.Millisecond * 10)
 			return "newTestValue", nil
 		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-
 		if err != nil {
 			t.Errorf("Expected to get no error, but got %v", err)
 		}
@@ -357,8 +353,8 @@ func TestPerfomance(t *testing.T) {
 				for i := 0; i < RequestsPerThread; i++ {
 					//nolint:gosec // we don't need cryptographically secure random number generator for tesst
 					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
-					_, err := cache.Cache(key, getGenerator(fmt.Sprintf("value%s", key), nil))
 
+					_, err := cache.Cache(key, getGenerator(fmt.Sprintf("value%s", key), nil))
 					if err != nil {
 						fmt.Printf("Error caching value for key %s: %v\n", key, err)
 						continue
