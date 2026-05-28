@@ -204,7 +204,7 @@ func (c *Cache) requestHandler() {
 				continue
 			}
 
-			ctx, cancel := context.WithCancel(context.Background()) //nolint:gosec // G118: cancel is stored in CacheQueue.cancelCtx and called on cleanup
+			ctx, cancel := context.WithCancel(context.Background())
 			requestStorage[req.key] = CacheQueue{
 				requests:  []*CacheReuest{req},
 				cancelCtx: cancel,
