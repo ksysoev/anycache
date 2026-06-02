@@ -59,8 +59,10 @@ type CacheQueue struct {
 	WarmingUp    bool
 }
 
-type CacheGenerator func(ctx context.Context) (string, error)
-type CacheOptions func(*Cache)
+type (
+	CacheGenerator func(ctx context.Context) (string, error)
+	CacheOptions   func(*Cache)
+)
 
 type CacheItemOptions func(*CacheReuest)
 
@@ -109,12 +111,6 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	}
 }
 
-func WithCtx(ctx context.Context) CacheItemOptions {
-	return func(req *CacheReuest) {
-		req.ctx = ctx
-	}
-}
-
 // Cache caches the result of the generator function for the given key.
 // If the key already exists in the cache, the cached value is returned.
 // Otherwise, the generator function is called to generate a new value,
@@ -122,13 +118,13 @@ func WithCtx(ctx context.Context) CacheItemOptions {
 // The function takes an optional list of CacheItemOptions to customize the caching behavior.
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
+func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
 	response := make(chan CacheResponse)
 	req := CacheReuest{
 		key:       key,
 		generator: generator,
 		response:  response,
-		ctx:       context.Background(),
+		ctx:       ctx,
 	}
 
 	for _, opt := range opts {
@@ -138,9 +134,9 @@ func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOpt
 	c.requests <- &req
 
 	select {
-	case <-req.ctx.Done():
+	case <-ctx.Done():
 		c.cancel <- &req
-		return "", req.ctx.Err()
+		return "", ctx.Err()
 	case resp := <-response:
 		return resp.value, resp.err
 	}
@@ -154,7 +150,7 @@ func (c *Cache) Cache(key string, generator CacheGenerator, opts ...CacheItemOpt
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
-func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
+func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
 	generatorWrapper := func(ctx context.Context) (string, error) {
 		val, err := generator(ctx)
 		if err != nil {
@@ -169,7 +165,7 @@ func (c *Cache) CacheStruct(key string, generator func(context.Context) (any, er
 		return string(jsonVal), nil
 	}
 
-	val, err := c.Cache(key, generatorWrapper, opts...)
+	val, err := c.Cache(ctx, key, generatorWrapper, opts...)
 	if err != nil {
 		return err
 	}
