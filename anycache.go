@@ -35,34 +35,14 @@ type Cache struct {
 	sf          singleflight.Group
 	warmUpSF    singleflight.Group
 	cancelCtx   context.CancelFunc
-	requests    chan *CacheReuest
-	responses   chan CacheResponse
 	cancel      chan *CacheReuest
 	wg          sync.WaitGroup
 	maxShiftTTL uint8
 }
 
 type CacheReuest struct {
-	generator CacheGenerator
-	ctx       context.Context
-	response  chan CacheResponse
-	key       string
 	TTL       time.Duration
 	WarmUpTTL time.Duration
-}
-
-type CacheResponse struct {
-	err       error
-	key       string
-	value     string
-	warmingUp bool
-}
-
-type CacheQueue struct {
-	cancelCtx    context.CancelFunc
-	currentValue string
-	requests     []*CacheReuest
-	WarmingUp    bool
 }
 
 type (
@@ -121,13 +101,7 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
-	response := make(chan CacheResponse)
-	req := CacheReuest{
-		key:       key,
-		generator: generator,
-		response:  response,
-		ctx:       ctx,
-	}
+	var req CacheReuest
 
 	for _, opt := range opts {
 		opt(&req)
@@ -154,13 +128,13 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 		}
 
 		if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
-			value, err = c.generateAndSet(&req)
+			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
 		}
 
 		if needWarmUp {
 			c.wg.Go(func() {
 				_, _, _ = c.warmUpSF.Do(key, func() (any, error) {
-					_, err := c.generateAndSet(&req)
+					_, err := c.generateAndSet(ctx, key, req.TTL, generator)
 					if err != nil {
 						slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 					}
@@ -226,15 +200,15 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
-	value, err := req.generator(req.ctx)
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) (string, error) {
+	value, err := generator(ctx)
 	if err != nil {
 		return value, err
 	}
 
-	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
+	ttl = randomizeTTL(c.maxShiftTTL, ttl)
 
-	err = c.Storage.Set(req.ctx, req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(ctx, key, value, storage.CacheStorageItemOptions{TTL: ttl})
 	if err != nil {
 		return value, err
 	}
