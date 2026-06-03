@@ -113,7 +113,7 @@ func TestCacheConcurrency(t *testing.T) {
 				return "testValue", nil
 			})
 			ch <- val
-		}(&cache, results)
+		}(cache, results)
 
 		go func(c *Cache, ch chan string) {
 			val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
@@ -121,7 +121,7 @@ func TestCacheConcurrency(t *testing.T) {
 				return "testValue1", nil
 			})
 			ch <- val
-		}(&cache, results)
+		}(cache, results)
 
 		val1, val2 := <-results, <-results
 
@@ -163,6 +163,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
+
 	if val != "testValue" {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}

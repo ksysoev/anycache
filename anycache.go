@@ -32,13 +32,14 @@ type CacheStorage interface {
 type Cache struct {
 	Storage     CacheStorage
 	ctx         context.Context
+	sf          singleflight.Group
+	warmUpSF    singleflight.Group
 	cancelCtx   context.CancelFunc
 	requests    chan *CacheReuest
 	responses   chan CacheResponse
 	cancel      chan *CacheReuest
-	maxShiftTTL uint8 // max shift of TTL in persent
-	sf          singleflight.Group
 	wg          sync.WaitGroup
+	maxShiftTTL uint8
 }
 
 type CacheReuest struct {
@@ -74,7 +75,7 @@ type CacheItemOptions func(*CacheReuest)
 // NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
-func NewCache(store CacheStorage, opts ...CacheOptions) Cache {
+func NewCache(store CacheStorage, opts ...CacheOptions) *Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	c := Cache{
@@ -92,7 +93,7 @@ func NewCache(store CacheStorage, opts ...CacheOptions) Cache {
 
 	go c.requestHandler()
 
-	return c
+	return &c
 }
 
 // WithTTLRandomization sets max shift of TTL in persent
@@ -162,7 +163,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 
 		if needWarmUp {
 			c.wg.Go(func() {
-				c.sf.Do("warmup::"+key, func() (any, error) {
+				_, _, _ = c.warmUpSF.Do(key, func() (any, error) {
 					_, err := c.generateAndSet(&req)
 					if err != nil {
 						slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
