@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/ksysoev/anycache/storage"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -34,6 +37,8 @@ type Cache struct {
 	responses   chan CacheResponse
 	cancel      chan *CacheReuest
 	maxShiftTTL uint8 // max shift of TTL in persent
+	sf          singleflight.Group
+	wg          sync.WaitGroup
 }
 
 type CacheReuest struct {
@@ -131,14 +136,60 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 		opt(&req)
 	}
 
-	c.requests <- &req
+	res := c.sf.DoChan(key, func() (any, error) {
+		var (
+			value      string
+			err        error
+			needWarmUp bool
+		)
+
+		if req.WarmUpTTL > 0 {
+			var ttl time.Duration
+
+			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
+
+			readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
+			if err == nil && readyForWarmUp {
+				needWarmUp = true
+			}
+		} else {
+			value, err = c.Storage.Get(c.ctx, key)
+		}
+
+		if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+			value, err = c.generateAndSet(&req)
+		}
+
+		if needWarmUp {
+			c.wg.Go(func() {
+				c.sf.Do("warmup::"+key, func() (any, error) {
+					_, err := c.generateAndSet(&req)
+					if err != nil {
+						slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
+					}
+
+					return nil, nil
+				})
+			})
+		}
+
+		return value, err
+	})
 
 	select {
 	case <-ctx.Done():
-		c.cancel <- &req
 		return "", ctx.Err()
-	case resp := <-response:
-		return resp.value, resp.err
+	case resp := <-res:
+		if resp.Err != nil {
+			return "", resp.Err
+		}
+
+		val, ok := resp.Val.(string)
+		if !ok {
+			return "", errors.New("unexpected value type returned from generator")
+		}
+
+		return val, nil
 	}
 }
 
