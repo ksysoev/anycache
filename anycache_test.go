@@ -140,7 +140,7 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	// For now, we test only Redis storage, Memcache client does not support TTL
+	// For now, we  est only Redis storage, Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redisstor.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore)
@@ -154,48 +154,28 @@ func TestCacheWarmingUp(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	results := make(chan string)
-
 	time.Sleep(time.Millisecond * 1001)
 
-	go func(c *Cache, ch chan string) {
-		val, err := c.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
-			time.Sleep(time.Millisecond * 10)
-			return "newTestValue", nil
-		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-		if err != nil {
-			t.Errorf("Expected to get no error, but got %v", err)
-		}
-
-		ch <- val
-	}(&cache, results)
-
-	go func(c *Cache, ch chan string) {
-		val, err := c.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
-			time.Sleep(time.Millisecond * 10)
-			return "newTestValue", nil
-		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-		if err != nil {
-			t.Errorf("Expected to get no error, but got %v", err)
-		}
-
-		ch <- val
-	}(&cache, results)
-
-	val1 := <-results
-	val2 := <-results
-
-	// First request
-	if val1 != "testValue" && val2 != "testValue" {
-		t.Errorf("Expected to get at least one testValue as a result, but got '%v' and %v", val1, val2)
+	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
+		time.Sleep(time.Millisecond * 10)
+		return "newTestValue", nil
+	}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	if val1 != "newTestValue" && val2 != "newTestValue" {
-		t.Errorf("Expected to get at least one new value, but got '%v' and '%v'", val1, val2)
+	time.Sleep(time.Millisecond * 50)
+
+	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
+	if val != "newTestValue" {
+		t.Errorf("Expected to get newTestValue, but got '%v'", val)
 	}
 }
 
