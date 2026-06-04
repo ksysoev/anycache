@@ -7,7 +7,6 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache"
-	"github.com/ksysoev/anycache/storage"
 )
 
 type MemcachedCacheStorage struct {
@@ -41,9 +40,9 @@ func (s *MemcachedCacheStorage) Get(_ context.Context, key string) (string, erro
 // It also accepts options which currently only includes TTL (time-to-live) for the key-value pair.
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
-func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, options storage.CacheStorageItemOptions) error {
-	if options.TTL.Nanoseconds() > 0 {
-		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(options.TTL.Seconds())})
+func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, ttl time.Duration) error {
+	if ttl > 0 {
+		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(ttl)})
 		if err != nil {
 			return err
 		}

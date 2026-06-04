@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ksysoev/anycache/storage"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -23,7 +22,7 @@ var ErrKeyNotExists = errors.New("key not exists")
 // CacheStorage
 type CacheStorage interface {
 	Get(context.Context, string) (string, error)
-	Set(context.Context, string, string, storage.CacheStorageItemOptions) error
+	Set(context.Context, string, string, time.Duration) error
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
 	GetWithTTL(context.Context, string) (string, time.Duration, error)
@@ -210,7 +209,7 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duratio
 
 	ttl = randomizeTTL(c.maxShiftTTL, ttl)
 
-	err = c.Storage.Set(ctx, key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(ctx, key, value, ttl)
 	if err != nil {
 		return value, err
 	}

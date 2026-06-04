@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/ksysoev/anycache"
-	"github.com/ksysoev/anycache/storage"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,7 +20,7 @@ func NewRedisCacheStorage(redisDB *redis.Client) *RedisCacheStorage {
 
 // Get retrieves the value associated with the provided key from the Redis cache storage.
 // It returns the value as a string and an error if any occurred.
-// If the key does not exist, it returns an empty string and a KeyNotExistError.
+// If the key does not exist, it returns an empty string and a ErrKeyNotExists.
 // If any other error occurs during the operation, it returns an empty string and the error.
 func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error) {
 	item, err := s.redisDB.Get(ctx, key).Result()
@@ -42,9 +41,9 @@ func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error)
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
 // If an error occurs during the operation, it returns the error.
-func (s *RedisCacheStorage) Set(ctx context.Context, key, value string, options storage.CacheStorageItemOptions) error {
-	if options.TTL.Nanoseconds() > 0 {
-		err := s.redisDB.Set(ctx, key, value, options.TTL).Err()
+func (s *RedisCacheStorage) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	if ttl > 0 {
+		err := s.redisDB.Set(ctx, key, value, ttl).Err()
 		if err != nil {
 			return err
 		}
@@ -83,7 +82,7 @@ func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Dur
 	}
 
 	if item.Nanoseconds() == -2 {
-		return false, item, storage.KeyNotExistError{}
+		return false, item, anycache.ErrKeyNotExists
 	}
 
 	return hasTTL, 0 * time.Second, errors.New("Unexpected TTL value returned from Redis" + item.String())
@@ -106,7 +105,7 @@ func (s *RedisCacheStorage) Del(ctx context.Context, key string) (bool, error) {
 
 // GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the Redis cache storage.
 // It returns the value as a string, the TTL as a time.Duration, and an error if any occurred.
-// If the key does not exist, it returns an empty string, a zero duration, and a KeyNotExistError.
+// If the key does not exist, it returns an empty string, a zero duration, and a ErrKeyNotExists.
 // If the key exists but does not have an expiration, it returns the value, a zero duration, and nil error.
 // If the key exists and has an expiration, it returns the value, the TTL, and nil error.
 func (s *RedisCacheStorage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
