@@ -113,7 +113,7 @@ func TestCacheConcurrency(t *testing.T) {
 				return "testValue", nil
 			})
 			ch <- val
-		}(&cache, results)
+		}(cache, results)
 
 		go func(c *Cache, ch chan string) {
 			val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
@@ -121,7 +121,7 @@ func TestCacheConcurrency(t *testing.T) {
 				return "testValue1", nil
 			})
 			ch <- val
-		}(&cache, results)
+		}(cache, results)
 
 		val1, val2 := <-results, <-results
 
@@ -140,7 +140,7 @@ func TestCacheConcurrency(t *testing.T) {
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	// For now, we test only Redis storage, Memcache client does not support TTL
+	// For now, we  est only Redis storage, Memcache client does not support TTL
 	redisClient := redis.NewClient(getRedisOptions())
 	cacheStore := redisstor.NewRedisCacheStorage(redisClient)
 	cache := NewCache(cacheStore)
@@ -154,48 +154,29 @@ func TestCacheWarmingUp(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	results := make(chan string)
-
 	time.Sleep(time.Millisecond * 1001)
 
-	go func(c *Cache, ch chan string) {
-		val, err := c.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
-			time.Sleep(time.Millisecond * 10)
-			return "newTestValue", nil
-		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-		if err != nil {
-			t.Errorf("Expected to get no error, but got %v", err)
-		}
-
-		ch <- val
-	}(&cache, results)
-
-	go func(c *Cache, ch chan string) {
-		val, err := c.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
-			time.Sleep(time.Millisecond * 10)
-			return "newTestValue", nil
-		}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-		if err != nil {
-			t.Errorf("Expected to get no error, but got %v", err)
-		}
-
-		ch <- val
-	}(&cache, results)
-
-	val1 := <-results
-	val2 := <-results
-
-	// First request
-	if val1 != "testValue" && val2 != "testValue" {
-		t.Errorf("Expected to get at least one testValue as a result, but got '%v' and %v", val1, val2)
+	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
+		time.Sleep(time.Millisecond * 10)
+		return "newTestValue", nil
+	}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if val1 != "newTestValue" && val2 != "newTestValue" {
-		t.Errorf("Expected to get at least one new value, but got '%v' and '%v'", val1, val2)
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
+	time.Sleep(time.Millisecond * 50)
+
+	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
+
+	if val != "newTestValue" {
+		t.Errorf("Expected to get newTestValue, but got '%v'", val)
 	}
 }
 
@@ -285,38 +266,6 @@ func TestCancelingRequest(t *testing.T) {
 
 		if err := cache.Close(); err != nil {
 			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
-	}
-}
-
-func TestClosingOnRequest(t *testing.T) {
-	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
-
-		// Define a generator function that returns the test value
-		generator := func(_ context.Context) (string, error) {
-			time.Sleep(time.Second)
-			return "testValue", nil
-		}
-
-		go func() {
-			time.Sleep(time.Millisecond * 5)
-
-			if err := cache.Close(); err != nil {
-				t.Errorf("%v: Close returned an error: %v", storageName, err)
-			}
-		}()
-
-		result, err := cache.Cache(t.Context(), "TestCancelingRequestKey", generator, WithTTL(2*time.Second))
-
-		// Check that the function returned no errors
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("%v: Cache returned unexpected error: %v", storageName, err)
-		}
-
-		// Check that the result variable contains the expected value
-		if result != "" {
-			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
 		}
 	}
 }

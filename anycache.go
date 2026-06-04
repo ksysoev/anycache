@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/ksysoev/anycache/storage"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -29,34 +32,17 @@ type CacheStorage interface {
 type Cache struct {
 	Storage     CacheStorage
 	ctx         context.Context
+	sf          singleflight.Group
+	warmUpSF    singleflight.Group
 	cancelCtx   context.CancelFunc
-	requests    chan *CacheReuest
-	responses   chan CacheResponse
 	cancel      chan *CacheReuest
-	maxShiftTTL uint8 // max shift of TTL in persent
+	wg          sync.WaitGroup
+	maxShiftTTL uint8
 }
 
 type CacheReuest struct {
-	generator CacheGenerator
-	ctx       context.Context
-	response  chan CacheResponse
-	key       string
 	TTL       time.Duration
 	WarmUpTTL time.Duration
-}
-
-type CacheResponse struct {
-	err       error
-	key       string
-	value     string
-	warmingUp bool
-}
-
-type CacheQueue struct {
-	cancelCtx    context.CancelFunc
-	currentValue string
-	requests     []*CacheReuest
-	WarmingUp    bool
 }
 
 type (
@@ -69,15 +55,13 @@ type CacheItemOptions func(*CacheReuest)
 // NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
-func NewCache(store CacheStorage, opts ...CacheOptions) Cache {
+func NewCache(store CacheStorage, opts ...CacheOptions) *Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	c := Cache{
 		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
-		requests:  make(chan *CacheReuest),
-		responses: make(chan CacheResponse),
 		cancel:    make(chan *CacheReuest),
 	}
 
@@ -85,9 +69,7 @@ func NewCache(store CacheStorage, opts ...CacheOptions) Cache {
 		opt(&c)
 	}
 
-	go c.requestHandler()
-
-	return c
+	return &c
 }
 
 // WithTTLRandomization sets max shift of TTL in persent
@@ -119,26 +101,66 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
-	response := make(chan CacheResponse)
-	req := CacheReuest{
-		key:       key,
-		generator: generator,
-		response:  response,
-		ctx:       ctx,
-	}
+	var req CacheReuest
 
 	for _, opt := range opts {
 		opt(&req)
 	}
 
-	c.requests <- &req
+	res := c.sf.DoChan(key, func() (any, error) {
+		var (
+			value      string
+			err        error
+			needWarmUp bool
+		)
+
+		if req.WarmUpTTL > 0 {
+			var ttl time.Duration
+
+			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
+
+			readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
+			if err == nil && readyForWarmUp {
+				needWarmUp = true
+			}
+		} else {
+			value, err = c.Storage.Get(c.ctx, key)
+		}
+
+		if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
+		}
+
+		if needWarmUp {
+			c.wg.Go(func() {
+				_, _, _ = c.warmUpSF.Do(key, func() (any, error) {
+					_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+					if err != nil {
+						slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
+					}
+
+					return nil, nil
+				})
+			})
+		}
+
+		return value, err
+	})
 
 	select {
 	case <-ctx.Done():
-		c.cancel <- &req
 		return "", ctx.Err()
-	case resp := <-response:
-		return resp.value, resp.err
+	case resp := <-res:
+		if resp.Err != nil {
+			return "", resp.Err
+		}
+
+		val, ok := resp.Val.(string)
+		if !ok {
+			return "", errors.New("unexpected value type returned from generator")
+		}
+
+		return val, nil
 	}
 }
 
@@ -175,188 +197,18 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 	return err
 }
 
-func (c *Cache) requestHandler() {
-	requestStorage := map[string]CacheQueue{}
-
-	for {
-		select {
-		case req := <-c.requests:
-			reqQ, ok := requestStorage[req.key]
-
-			if ok {
-				if reqQ.WarmingUp {
-					req.response <- CacheResponse{
-						key:   req.key,
-						value: reqQ.currentValue,
-						err:   nil,
-					}
-
-					continue
-				}
-
-				reqQ.requests = append(reqQ.requests, req)
-				requestStorage[req.key] = reqQ
-
-				continue
-			}
-
-			ctx, cancel := context.WithCancel(context.Background())
-			requestStorage[req.key] = CacheQueue{
-				requests:  []*CacheReuest{req},
-				cancelCtx: cancel,
-			}
-
-			reqCopy := *req
-			reqCopy.ctx = ctx
-
-			go c.processRequest(&reqCopy)
-		case resp := <-c.responses:
-			reqQ, ok := requestStorage[resp.key]
-
-			if !ok {
-				continue
-			}
-
-			if resp.warmingUp {
-				reqQ.currentValue = resp.value
-				reqQ.WarmingUp = true
-				processNow := reqQ.requests[1:]
-				reqQ.requests = reqQ.requests[:1]
-				requestStorage[resp.key] = reqQ
-
-				for _, req := range processNow {
-					req.response <- resp
-
-					close(req.response)
-				}
-
-				continue
-			}
-
-			for _, req := range reqQ.requests {
-				req.response <- resp
-			}
-
-			delete(requestStorage, resp.key)
-
-		case req := <-c.cancel:
-			reqQ, ok := requestStorage[req.key]
-
-			if !ok {
-				continue
-			}
-
-			close(req.response)
-
-			if len(reqQ.requests) == 1 {
-				reqQ.cancelCtx()
-				delete(requestStorage, req.key)
-
-				continue
-			}
-
-			for i, r := range reqQ.requests {
-				if r == req {
-					reqQ.requests = append(reqQ.requests[:i], reqQ.requests[i+1:]...)
-					requestStorage[req.key] = reqQ
-
-					break
-				}
-			}
-		case <-c.ctx.Done():
-			for _, reqQ := range requestStorage {
-				reqQ.cancelCtx()
-
-				for _, req := range reqQ.requests {
-					req.response <- CacheResponse{
-						key:   req.key,
-						value: "",
-						err:   c.ctx.Err(),
-					}
-
-					close(req.response)
-				}
-			}
-
-			return
-		}
-	}
-}
-
-// processRequest processes a cache request with the given key, generator function, and options.
-// If the cache storage has a value for the key, it returns the value and any error encountered.
-// If the cache storage does not have a value for the key, it generates a value using the provided generator function,
-// sets it in the cache storage with the given key and options, and returns the generated value and any error encountered.
-// If the cache item options include a warm-up TTL, it checks if the current TTL of the key is less than or equal to the warm-up TTL.
-// If the current TTL is less than or equal to the warm-up TTL, it sets the value in the cache storage again with the same key and options,
-// and returns the new value and any error encountered.
-func (c *Cache) processRequest(req *CacheReuest) {
-	var (
-		value      string
-		err        error
-		needWarmUp bool
-	)
-
-	if req.WarmUpTTL.Nanoseconds() > 0 {
-		var ttl time.Duration
-
-		value, ttl, err = c.Storage.GetWithTTL(req.ctx, req.key)
-
-		readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
-		if err == nil && readyForWarmUp {
-			needWarmUp = true
-		}
-	} else {
-		value, err = c.Storage.Get(req.ctx, req.key)
-	}
-
-	if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
-		value, err = c.generateAndSet(req)
-	}
-
-	cacheResp := CacheResponse{
-		key:       req.key,
-		value:     value,
-		err:       err,
-		warmingUp: needWarmUp,
-	}
-
-	select {
-	case c.responses <- cacheResp:
-	case <-req.ctx.Done():
-		return
-	}
-
-	if needWarmUp {
-		newVal, err := c.generateAndSet(req)
-
-		cacheResp := CacheResponse{
-			key:       req.key,
-			value:     newVal,
-			err:       err,
-			warmingUp: false,
-		}
-
-		select {
-		case c.responses <- cacheResp:
-		case <-req.ctx.Done():
-			return
-		}
-	}
-}
-
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(req *CacheReuest) (string, error) {
-	value, err := req.generator(req.ctx)
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) (string, error) {
+	value, err := generator(ctx)
 	if err != nil {
 		return value, err
 	}
 
-	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
+	ttl = randomizeTTL(c.maxShiftTTL, ttl)
 
-	err = c.Storage.Set(req.ctx, req.key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(ctx, key, value, storage.CacheStorageItemOptions{TTL: ttl})
 	if err != nil {
 		return value, err
 	}
@@ -383,6 +235,7 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 // Close closes the Cache instance.
 // It returns an error if any occurred.
 func (c *Cache) Close() error {
+	// cancel background requests
 	c.cancelCtx()
 	return c.Storage.Close()
 }
