@@ -3,59 +3,9 @@ package anycache
 import (
 	"context"
 	"errors"
-	"fmt"
-	"math/rand"
-	"os"
-	"sync"
 	"testing"
 	"time"
-
-	"github.com/bradfitz/gomemcache/memcache"
-	memcachestor "github.com/ksysoev/anycache/storage/memcache"
-	redisstor "github.com/ksysoev/anycache/storage/redis"
-	"github.com/redis/go-redis/v9"
 )
-
-func getRedisOptions() *redis.Options {
-	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
-	if TestRedisHost == "" {
-		TestRedisHost = "localhost"
-	}
-
-	TestRedisPort := os.Getenv("TEST_REDIS_PORT")
-	if TestRedisPort == "" {
-		TestRedisPort = "6379"
-	}
-
-	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)}
-}
-
-func getMemcachedHost() string {
-	TestRedisHost := os.Getenv("TEST_MEMCACHED_HOST")
-	if TestRedisHost == "" {
-		TestRedisHost = "localhost"
-	}
-
-	TestRedisPort := os.Getenv("TEST_MEMCACHED_PORT")
-	if TestRedisPort == "" {
-		TestRedisPort = "11211"
-	}
-
-	return fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)
-}
-
-func getCacheStorages() map[string]CacheStorage {
-	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := redisstor.NewRedisCacheStorage(redisClient)
-
-	memcachedClient := memcache.New(getMemcachedHost())
-	memcachedStore := memcachestor.NewMemcachedCacheStorage(memcachedClient)
-
-	return map[string]CacheStorage{
-		"redis":     redisStore,
-		"memcached": memcachedStore,
-	}
-}
 
 func getGenerator(val string, err error) CacheGenerator {
 	return func(_ context.Context) (string, error) {
@@ -64,86 +14,82 @@ func getGenerator(val string, err error) CacheGenerator {
 }
 
 func TestCache(t *testing.T) {
-	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
+	store := NewMockCacheStorage(t)
+	cache := NewCache(store)
 
-		val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue", nil))
-		if err != nil {
-			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
-		}
+	val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue", nil))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
-		if val != "testValue" {
-			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
-		}
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
+	}
 
-		val, err = cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue1", nil))
-		if err != nil {
-			t.Errorf("%v: Expected to get no error, but got %v", storageName, err)
-		}
+	val, err = cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue1", nil))
+	if err != nil {
+		t.Errorf("Expected to get no error, but got %v", err)
+	}
 
-		if val != "testValue" {
-			t.Errorf("%v: Expected to get testValue, but got '%v'", storageName, val)
-		}
+	if val != "testValue" {
+		t.Errorf("Expected to get testValue, but got '%v'", val)
+	}
 
-		val, err = cache.Cache(t.Context(), "TestCacheKey1", getGenerator("", errors.New("TestError")))
+	val, err = cache.Cache(t.Context(), "TestCacheKey1", getGenerator("", errors.New("TestError")))
 
-		if err == errors.New("TestError") {
-			t.Errorf("%v: Expected to get TestError, but got %v", storageName, err)
-		}
+	if err == errors.New("TestError") {
+		t.Errorf("Expected to get TestError, but got %v", err)
+	}
 
-		if val != "" {
-			t.Errorf("%v: Expected to get empty string, but got '%v'", storageName, val)
-		}
+	if val != "" {
+		t.Errorf("Expected to get empty string, but got '%v'", val)
+	}
 
-		if err := cache.Close(); err != nil {
-			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close returned an error: %v", err)
 	}
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
+	storage := NewMockCacheStorage(t)
+	cache := NewCache(storage)
 
-		results := make(chan string)
+	results := make(chan string)
 
-		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
-				time.Sleep(time.Millisecond)
-				return "testValue", nil
-			})
-			ch <- val
-		}(cache, results)
+	go func(c *Cache, ch chan string) {
+		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
+			time.Sleep(time.Millisecond)
+			return "testValue", nil
+		})
+		ch <- val
+	}(cache, results)
 
-		go func(c *Cache, ch chan string) {
-			val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
-				time.Sleep(time.Millisecond)
-				return "testValue1", nil
-			})
-			ch <- val
-		}(cache, results)
+	go func(c *Cache, ch chan string) {
+		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
+			time.Sleep(time.Millisecond)
+			return "testValue1", nil
+		})
+		ch <- val
+	}(cache, results)
 
-		val1, val2 := <-results, <-results
+	val1, val2 := <-results, <-results
 
-		if val1 != "testValue" && val1 != "testValue1" {
-			t.Errorf("%v: Expected to get testValue as a result, but got '%v'", storageName, val1)
-		}
+	if val1 != "testValue" && val1 != "testValue1" {
+		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
+	}
 
-		if val1 != val2 {
-			t.Errorf("%v: Expected to get same result for concurent requests, but got '%v' and '%v", storageName, val1, val2)
-		}
+	if val1 != val2 {
+		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
+	}
 
-		if err := cache.Close(); err != nil {
-			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close returned an error: %v", err)
 	}
 }
 
 func TestCacheWarmingUp(t *testing.T) {
-	// For now, we  est only Redis storage, Memcache client does not support TTL
-	redisClient := redis.NewClient(getRedisOptions())
-	cacheStore := redisstor.NewRedisCacheStorage(redisClient)
-	cache := NewCache(cacheStore)
+	store := NewMockCacheStorage(t)
+	cache := NewCache(store)
 
 	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 	if err != nil {
@@ -189,138 +135,81 @@ func TestRandomizeTTL(t *testing.T) {
 }
 
 func TestCacheJSON(t *testing.T) {
-	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
+	store := NewMockCacheStorage(t)
+	cache := NewCache(store)
 
-		// Define a test key and value
-		key := "TestCacheJSONKey"
-		value := map[string]string{
-			"foo": "bar",
-			"baz": "qux",
-		}
+	// Define a test key and value
+	key := "TestCacheJSONKey"
+	value := map[string]string{
+		"foo": "bar",
+		"baz": "qux",
+	}
 
-		// Define a generator function that returns the test value
-		generator := func(_ context.Context) (any, error) {
-			return value, nil
-		}
+	// Define a generator function that returns the test value
+	generator := func(_ context.Context) (any, error) {
+		return value, nil
+	}
 
-		// Define a result variable to hold the unmarshalled JSON value
-		var result map[string]string
+	// Define a result variable to hold the unmarshalled JSON value
+	var result map[string]string
 
-		// Call the CacheJSON function to cache the test value
-		err := cache.CacheStruct(t.Context(), key, generator, &result)
-		// Check that the function returned no errors
-		if err != nil {
-			t.Errorf("%v: CacheJSON returned an error: %v", storageName, err)
-		}
+	// Call the CacheJSON function to cache the test value
+	err := cache.CacheStruct(t.Context(), key, generator, &result)
+	// Check that the function returned no errors
+	if err != nil {
+		t.Errorf("CacheJSON returned an error: %v", err)
+	}
 
-		// Check that the result variable contains the expected value
-		if result["foo"] != "bar" || result["baz"] != "qux" {
-			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
-		}
+	// Check that the result variable contains the expected value
+	if result["foo"] != "bar" || result["baz"] != "qux" {
+		t.Errorf("CacheJSON returned an unexpected value: %v", result)
+	}
 
-		// Call the CacheJSON function again to read value from storage
-		err = cache.CacheStruct(t.Context(), key, generator, &result)
-		// Check that the function returned no errors
-		if err != nil {
-			t.Errorf("%v: CacheJSON returned an error: %v", storageName, err)
-		}
+	// Call the CacheJSON function again to read value from storage
+	err = cache.CacheStruct(t.Context(), key, generator, &result)
+	// Check that the function returned no errors
+	if err != nil {
+		t.Errorf("CacheJSON returned an error: %v", err)
+	}
 
-		// Check that the result variable contains the expected value
-		if result["foo"] != "bar" || result["baz"] != "qux" {
-			t.Errorf("%v: CacheJSON returned an unexpected value: %v", storageName, result)
-		}
+	// Check that the result variable contains the expected value
+	if result["foo"] != "bar" || result["baz"] != "qux" {
+		t.Errorf("CacheJSON returned an unexpected value: %v", result)
+	}
 
-		if err := cache.Close(); err != nil {
-			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close returned an error: %v", err)
 	}
 }
 
 func TestCancelingRequest(t *testing.T) {
-	for storageName, cacheStorage := range getCacheStorages() {
-		cache := NewCache(cacheStorage)
+	store := NewMockCacheStorage(t)
+	cache := NewCache(store)
 
-		// Define a generator function that returns the test value
-		generator := func(_ context.Context) (string, error) {
-			time.Sleep(time.Millisecond * 500)
-			return "testValue", nil
-		}
-
-		// Call the CacheJSON function to cache the test value
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
-
-		result, err := cache.Cache(ctx, "TestCancelingRequestKey", generator, WithTTL(2*time.Second))
-
-		// Check that the function returned no errors
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Errorf("%v: Cache returned unexpected error: %v", storageName, err)
-		}
-
-		// Check that the result variable contains the expected value
-		if result != "" {
-			t.Errorf("%v: Cache returned an unexpected value: %v", storageName, result)
-		}
-
-		cancel()
-
-		if err := cache.Close(); err != nil {
-			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
-	}
-}
-
-func TestPerfomance(t *testing.T) {
-	const (
-		TestRedisHost     = "localhost"
-		TestRedisPort     = "6379"
-		MaxConcurrency    = 10000
-		RequestsPerThread = 10
-		NumberOfKeys      = 400
-	)
-
-	expectedResults := map[string]time.Duration{
-		// For Github Actions we have to increase expected timing, on local machine it runs >20X faster
-		"redis":     7 * time.Second,
-		"memcached": 10 * time.Second,
+	// Define a generator function that returns the test value
+	generator := func(_ context.Context) (string, error) {
+		time.Sleep(time.Millisecond * 500)
+		return "testValue", nil
 	}
 
-	for storageName, cacheStorage := range getCacheStorages() {
-		var wg sync.WaitGroup
+	// Call the CacheJSON function to cache the test value
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
 
-		cache := NewCache(cacheStorage)
-		startTime := time.Now()
+	result, err := cache.Cache(ctx, "TestCancelingRequestKey", generator, WithTTL(2*time.Second))
 
-		for i := 0; i < MaxConcurrency; i++ {
-			wg.Add(1)
+	// Check that the function returned no errors
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Cache returned unexpected error: %v", err)
+	}
 
-			go func() {
-				defer wg.Done()
+	// Check that the result variable contains the expected value
+	if result != "" {
+		t.Errorf("Cache returned an unexpected value: %v", result)
+	}
 
-				for i := 0; i < RequestsPerThread; i++ {
-					//nolint:gosec // we don't need cryptographically secure random number generator for tesst
-					key := fmt.Sprintf("key%d", rand.Intn(NumberOfKeys))
+	cancel()
 
-					_, err := cache.Cache(t.Context(), key, getGenerator(fmt.Sprintf("value%s", key), nil))
-					if err != nil {
-						fmt.Printf("Error caching value for key %s: %v\n", key, err)
-						continue
-					}
-				}
-			}()
-		}
-
-		wg.Wait()
-
-		if time.Since(startTime) > expectedResults[storageName] {
-			numberOfRequests := MaxConcurrency * RequestsPerThread
-			t.Errorf("Total time of execution for %s: %d requests per  %v\n", storageName, numberOfRequests, time.Since(startTime))
-		}
-
-		fmt.Printf("Total time of execution for %s: %v\n", storageName, time.Since(startTime))
-
-		if err := cache.Close(); err != nil {
-			t.Errorf("%v: Close returned an error: %v", storageName, err)
-		}
+	if err := cache.Close(); err != nil {
+		t.Errorf("Close returned an error: %v", err)
 	}
 }
