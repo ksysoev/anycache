@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
+	"github.com/ksysoev/anycache"
 	"github.com/ksysoev/anycache/storage"
 )
 
@@ -48,8 +49,8 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 
 	_, err = memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey1")
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	if !errors.Is(err, anycache.ErrKeyNotExists) {
+		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
 	}
 }
 

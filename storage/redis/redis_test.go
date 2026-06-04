@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ksysoev/anycache"
 	"github.com/ksysoev/anycache/storage"
 	"github.com/redis/go-redis/v9"
 )
@@ -45,8 +46,8 @@ func TestRedisCacheStorageGet(t *testing.T) {
 
 	_, err = redisStore.Get(ctx, "TestRedisCacheStorageGetKey1")
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	if !errors.Is(err, anycache.ErrKeyNotExists) {
+		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
 	}
 }
 
@@ -108,8 +109,8 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 	_, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey1")
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	if !errors.Is(err, anycache.ErrKeyNotExists) {
+		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
 	}
 
 	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)

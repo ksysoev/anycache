@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ksysoev/anycache"
 	"github.com/ksysoev/anycache/storage"
 	"github.com/redis/go-redis/v9"
 )
@@ -26,7 +27,7 @@ func (s *RedisCacheStorage) Get(ctx context.Context, key string) (string, error)
 	item, err := s.redisDB.Get(ctx, key).Result()
 
 	if errors.Is(err, redis.Nil) {
-		return "", storage.KeyNotExistError{}
+		return "", anycache.ErrKeyNotExists
 	}
 
 	if err != nil {

@@ -18,6 +18,8 @@ const (
 	HundredPercent = 100
 )
 
+var ErrKeyNotExists = errors.New("key not exists")
+
 // CacheStorage
 type CacheStorage interface {
 	Get(context.Context, string) (string, error)
@@ -127,7 +129,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			value, err = c.Storage.Get(c.ctx, key)
 		}
 
-		if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+		if err != nil && errors.Is(err, ErrKeyNotExists) {
 			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
 		}
 
