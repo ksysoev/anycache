@@ -3,6 +3,7 @@ package memcachestor
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
@@ -41,7 +42,7 @@ func (s *MemcachedCacheStorage) Get(_ context.Context, key string) (string, erro
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
 func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, ttl time.Duration) error {
-	if ttl.Seconds() > float64(^int32(0)) {
+	if ttl.Seconds() > math.MaxInt32 {
 		return errors.New("TTL value is too large")
 	}
 
