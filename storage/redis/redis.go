@@ -85,7 +85,7 @@ func (s *RedisCacheStorage) TTL(ctx context.Context, key string) (bool, time.Dur
 		return false, item, anycache.ErrKeyNotExists
 	}
 
-	return hasTTL, 0 * time.Second, errors.New("Unexpected TTL value returned from Redis" + item.String())
+	return hasTTL, 0 * time.Second, errors.New("unexpected TTL value returned from Redis: " + item.String())
 }
 
 // Del deletes the value associated with the provided key from the Redis cache storage.
