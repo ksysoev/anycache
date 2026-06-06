@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
-	"github.com/ksysoev/anycache/storage"
+	"github.com/ksysoev/anycache"
 )
 
 func getMemcachedHost() string {
@@ -48,8 +48,8 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 
 	_, err = memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey1")
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	if !errors.Is(err, anycache.ErrKeyNotExists) {
+		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
 	}
 }
 
@@ -59,7 +59,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", "testValue", storage.CacheStorageItemOptions{})
+	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", "testValue", 0)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -70,7 +70,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", item.Value)
 	}
 
-	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", "testValue", storage.CacheStorageItemOptions{TTL: 2 * time.Second})
+	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", "testValue", 2*time.Second)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -108,8 +108,8 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 	_, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey1")
 
-	if !errors.Is(err, storage.KeyNotExistError{}) {
-		t.Errorf("Expected to get error %v, but got '%v'", storage.KeyNotExistError{}, err)
+	if !errors.Is(err, anycache.ErrKeyNotExists) {
+		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
 	}
 
 	err = memcachedClient.Set(&memcache.Item{Key: "TestMemcacheCacheStorageTTLKey2", Value: []byte("testValue")})

@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/ksysoev/anycache/storage"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -18,10 +18,12 @@ const (
 	HundredPercent = 100
 )
 
+var ErrKeyNotExists = errors.New("key does not exist")
+
 // CacheStorage
 type CacheStorage interface {
 	Get(context.Context, string) (string, error)
-	Set(context.Context, string, string, storage.CacheStorageItemOptions) error
+	Set(context.Context, string, string, time.Duration) error
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
 	GetWithTTL(context.Context, string) (string, time.Duration, error)
@@ -107,19 +109,22 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 		opt(&req)
 	}
 
-	res := c.sf.DoChan(key, func() (any, error) {
-		var (
-			value      string
-			err        error
-			needWarmUp bool
-		)
+	res := c.sf.DoChan(key, func() (value any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("cache.Cache panicked: %v", r)
+				value = ""
+			}
+		}()
+
+		var needWarmUp bool
 
 		if req.WarmUpTTL > 0 {
 			var ttl time.Duration
 
 			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
-			readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
+			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 			if err == nil && readyForWarmUp {
 				needWarmUp = true
 			}
@@ -127,8 +132,11 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			value, err = c.Storage.Get(c.ctx, key)
 		}
 
-		if err != nil && errors.Is(err, storage.KeyNotExistError{}) {
+		switch {
+		case errors.Is(err, ErrKeyNotExists):
 			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
+		case err != nil:
+			return "", err
 		}
 
 		if needWarmUp {
@@ -208,7 +216,7 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duratio
 
 	ttl = randomizeTTL(c.maxShiftTTL, ttl)
 
-	err = c.Storage.Set(ctx, key, value, storage.CacheStorageItemOptions{TTL: ttl})
+	err = c.Storage.Set(ctx, key, value, ttl)
 	if err != nil {
 		return value, err
 	}
@@ -237,5 +245,7 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 func (c *Cache) Close() error {
 	// cancel background requests
 	c.cancelCtx()
-	return c.Storage.Close()
+	c.wg.Wait()
+
+	return nil
 }
