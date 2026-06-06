@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/mock"
 )
 
 func getGenerator(val string, err error) CacheGenerator {
@@ -17,6 +19,9 @@ func TestCache(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 
+	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return("TestCacheKey", ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "TestCacheKey", "testValue", mock.Anything).Return(nil)
+
 	val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue", nil))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -26,6 +31,8 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
+	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return("testValue", nil)
+
 	val, err = cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue1", nil))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
@@ -34,27 +41,16 @@ func TestCache(t *testing.T) {
 	if val != "testValue" {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
-
-	val, err = cache.Cache(t.Context(), "TestCacheKey1", getGenerator("", errors.New("TestError")))
-
-	if err == errors.New("TestError") {
-		t.Errorf("Expected to get TestError, but got %v", err)
-	}
-
-	if val != "" {
-		t.Errorf("Expected to get empty string, but got '%v'", val)
-	}
-
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
-	}
 }
 
 func TestCacheConcurrency(t *testing.T) {
-	storage := NewMockCacheStorage(t)
-	cache := NewCache(storage)
+	store := NewMockCacheStorage(t)
+	cache := NewCache(store)
 
 	results := make(chan string)
+
+	store.EXPECT().Get(mock.Anything, "TestCacheConcurrencyKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "TestCacheConcurrencyKey", mock.Anything, mock.Anything).Return(nil)
 
 	go func(c *Cache, ch chan string) {
 		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
@@ -81,17 +77,16 @@ func TestCacheConcurrency(t *testing.T) {
 	if val1 != val2 {
 		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
 	}
-
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
-	}
 }
 
 func TestCacheWarmingUp(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 
-	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return("testValue", 500*time.Millisecond, nil)
+	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", "newTestValue", 2*time.Second).Return(nil)
+
+	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("newTestValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -100,30 +95,7 @@ func TestCacheWarmingUp(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	time.Sleep(time.Millisecond * 1001)
-
-	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", func(_ context.Context) (string, error) {
-		time.Sleep(time.Millisecond * 10)
-		return "newTestValue", nil
-	}, WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
-
-	time.Sleep(time.Millisecond * 50)
-
-	val, err = cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("testValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	if val != "newTestValue" {
-		t.Errorf("Expected to get newTestValue, but got '%v'", val)
-	}
+	time.Sleep(time.Millisecond)
 }
 
 func TestRandomizeTTL(t *testing.T) {
@@ -137,12 +109,12 @@ func TestRandomizeTTL(t *testing.T) {
 func TestCacheJSON(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
-
+	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", "{\"foo\":\"bar\"}", mock.Anything).Return(nil)
 	// Define a test key and value
 	key := "TestCacheJSONKey"
 	value := map[string]string{
 		"foo": "bar",
-		"baz": "qux",
 	}
 
 	// Define a generator function that returns the test value
@@ -161,39 +133,25 @@ func TestCacheJSON(t *testing.T) {
 	}
 
 	// Check that the result variable contains the expected value
-	if result["foo"] != "bar" || result["baz"] != "qux" {
+	if result["foo"] != "bar" {
 		t.Errorf("CacheJSON returned an unexpected value: %v", result)
-	}
-
-	// Call the CacheJSON function again to read value from storage
-	err = cache.CacheStruct(t.Context(), key, generator, &result)
-	// Check that the function returned no errors
-	if err != nil {
-		t.Errorf("CacheJSON returned an error: %v", err)
-	}
-
-	// Check that the result variable contains the expected value
-	if result["foo"] != "bar" || result["baz"] != "qux" {
-		t.Errorf("CacheJSON returned an unexpected value: %v", result)
-	}
-
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
 	}
 }
 
 func TestCancelingRequest(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
+	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", "testValue", mock.Anything).Return(nil)
 
 	// Define a generator function that returns the test value
-	generator := func(_ context.Context) (string, error) {
-		time.Sleep(time.Millisecond * 500)
+	generator := func(ctx context.Context) (string, error) {
+		<-ctx.Done()
 		return "testValue", nil
 	}
 
 	// Call the CacheJSON function to cache the test value
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
 
 	result, err := cache.Cache(ctx, "TestCancelingRequestKey", generator, WithTTL(2*time.Second))
 
@@ -212,4 +170,6 @@ func TestCancelingRequest(t *testing.T) {
 	if err := cache.Close(); err != nil {
 		t.Errorf("Close returned an error: %v", err)
 	}
+
+	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
 }

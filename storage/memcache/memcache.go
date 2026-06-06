@@ -41,8 +41,12 @@ func (s *MemcachedCacheStorage) Get(_ context.Context, key string) (string, erro
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
 func (s *MemcachedCacheStorage) Set(_ context.Context, key, value string, ttl time.Duration) error {
+	if ttl.Seconds() > float64(^int32(0)) {
+		return errors.New("TTL value is too large")
+	}
+
 	if ttl > 0 {
-		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(ttl)})
+		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(ttl.Seconds())})
 		if err != nil {
 			return err
 		}

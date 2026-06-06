@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand"
 	"sync"
@@ -108,19 +109,22 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 		opt(&req)
 	}
 
-	res := c.sf.DoChan(key, func() (any, error) {
-		var (
-			value      string
-			err        error
-			needWarmUp bool
-		)
+	res := c.sf.DoChan(key, func() (value any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("Cache functioned panicked: %v", r)
+				value = ""
+			}
+		}()
+
+		var needWarmUp bool
 
 		if req.WarmUpTTL > 0 {
 			var ttl time.Duration
 
 			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
-			readyForWarmUp := ttl.Nanoseconds() != 0 && ttl.Nanoseconds() <= req.WarmUpTTL.Nanoseconds()
+			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 			if err == nil && readyForWarmUp {
 				needWarmUp = true
 			}
@@ -128,8 +132,11 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			value, err = c.Storage.Get(c.ctx, key)
 		}
 
-		if err != nil && errors.Is(err, ErrKeyNotExists) {
+		switch {
+		case errors.Is(err, ErrKeyNotExists):
 			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
+		case err != nil:
+			return "", err
 		}
 
 		if needWarmUp {
@@ -238,5 +245,7 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 func (c *Cache) Close() error {
 	// cancel background requests
 	c.cancelCtx()
-	return c.Storage.Close()
+	c.wg.Wait()
+
+	return nil
 }
