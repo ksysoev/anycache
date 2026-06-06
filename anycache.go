@@ -18,7 +18,7 @@ const (
 	HundredPercent = 100
 )
 
-var ErrKeyNotExists = errors.New("key not exists")
+var ErrKeyNotExists = errors.New("key does not exist")
 
 // CacheStorage
 type CacheStorage interface {
