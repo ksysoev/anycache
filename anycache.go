@@ -112,7 +112,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				err = fmt.Errorf("Cache functioned panicked: %v", r)
+				err = fmt.Errorf("cache.Cache panicked: %v", r)
 				value = ""
 			}
 		}()
