@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -172,4 +173,55 @@ func TestCancelingRequest(t *testing.T) {
 	}
 
 	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
+}
+
+func TestCache_Invalidate(t *testing.T) {
+	tests := []struct {
+		setup   func() CacheStorage
+		name    string
+		key     string
+		wantErr bool
+	}{
+		{
+			name:    "Invalidate key successfully",
+			key:     "TestInvalidateKey",
+			wantErr: false,
+			setup: func() CacheStorage {
+				store := NewMockCacheStorage(t)
+				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(true, nil)
+
+				return store
+			},
+		},
+		{
+			name:    "Invalidate key with error",
+			key:     "TestInvalidateKey",
+			wantErr: true,
+			setup: func() CacheStorage {
+				store := NewMockCacheStorage(t)
+				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(false, assert.AnError)
+
+				return store
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := tt.setup()
+			c := NewCache(store)
+
+			gotErr := c.Invalidate(context.Background(), tt.key)
+			if gotErr != nil {
+				if !tt.wantErr {
+					t.Errorf("Invalidate() failed: %v", gotErr)
+				}
+
+				return
+			}
+
+			if tt.wantErr {
+				t.Fatal("Invalidate() succeeded unexpectedly")
+			}
+		})
+	}
 }
