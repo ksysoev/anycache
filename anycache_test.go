@@ -204,13 +204,24 @@ func TestCache_Invalidate(t *testing.T) {
 				return store
 			},
 		},
+		{
+			name:    "Invalidate missing key",
+			key:     "TestInvalidateNotExistingKey",
+			wantErr: false,
+			setup: func() CacheStorage {
+				store := NewMockCacheStorage(t)
+				store.EXPECT().Del(mock.Anything, "TestInvalidateNotExistingKey").Return(false, nil)
+
+				return store
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := tt.setup()
 			c := NewCache(store)
 
-			gotErr := c.Invalidate(context.Background(), tt.key)
+			gotErr := c.Invalidate(t.Context(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("Invalidate() failed: %v", gotErr)
