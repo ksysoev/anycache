@@ -1,22 +1,27 @@
 package inmemory
 
 import (
+	"container/list"
 	"context"
+	"sync"
 	"time"
 )
 
-// type CacheStorage interface {
-// 	Get(context.Context, string) (string, error)
-// 	Set(context.Context, string, string, time.Duration) error
-// 	TTL(context.Context, string) (bool, time.Duration, error)
-// 	Del(context.Context, string) (bool, error)
-// 	GetWithTTL(context.Context, string) (string, time.Duration, error)
-// }
+type cacheItem struct {
+	value  []byte
+	expiry *time.Time
+}
 
-type InMemoryCacheStorage struct{}
+type InMemoryCacheStorage struct {
+	index *sync.Map
+	items *list.List
+}
 
 func New() *InMemoryCacheStorage {
-	return &InMemoryCacheStorage{}
+	return &InMemoryCacheStorage{
+		index: &sync.Map{},
+		items: list.New(),
+	}
 }
 
 func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error) {
@@ -24,6 +29,21 @@ func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error
 }
 
 func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, ttl time.Duration) error {
+	var expiry *time.Time
+
+	if ttl > 0 {
+		now := time.Now().Add(ttl)
+		expiry = &now
+	}
+
+	storageItem := &cacheItem{
+		[]byte(value),
+		expiry,
+	}
+
+	s.index.Store(key, storageItem)
+	s.items.PushBack(storageItem)
+
 	return nil
 }
 
