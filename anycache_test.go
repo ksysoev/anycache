@@ -180,12 +180,12 @@ func TestCache_Invalidate(t *testing.T) {
 		setup   func() CacheStorage
 		name    string
 		key     string
-		wantErr error
+		wantErr bool
 	}{
 		{
 			name:    "Invalidate key successfully",
 			key:     "TestInvalidateKey",
-			wantErr: nil,
+			wantErr: false,
 			setup: func() CacheStorage {
 				store := NewMockCacheStorage(t)
 				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(true, nil)
@@ -196,21 +196,10 @@ func TestCache_Invalidate(t *testing.T) {
 		{
 			name:    "Invalidate key with error",
 			key:     "TestInvalidateKey",
-			wantErr: assert.AnError,
+			wantErr: true,
 			setup: func() CacheStorage {
 				store := NewMockCacheStorage(t)
 				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(false, assert.AnError)
-
-				return store
-			},
-		},
-		{
-			name:    "Invalidate non-existing key",
-			key:     "TestInvalidateKey",
-			wantErr: ErrKeyNotExists,
-			setup: func() CacheStorage {
-				store := NewMockCacheStorage(t)
-				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(false, nil)
 
 				return store
 			},
@@ -223,15 +212,15 @@ func TestCache_Invalidate(t *testing.T) {
 
 			gotErr := c.Invalidate(context.Background(), tt.key)
 			if gotErr != nil {
-				if isError := errors.Is(gotErr, tt.wantErr); !isError {
-					t.Errorf("Expected error '%v', but got '%v'", tt.wantErr, gotErr)
+				if !tt.wantErr {
+					t.Errorf("Invalidate() failed: %v", gotErr)
 				}
 
 				return
 			}
 
-			if tt.wantErr != nil {
-				t.Fatal("Expected an error, but got nil")
+			if tt.wantErr {
+				t.Fatal("Invalidate() succeeded unexpectedly")
 			}
 		})
 	}

@@ -208,13 +208,9 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 // accepts a context and the key to be invalidated.
 // returns an error if there was a problem invalidating the cache for the key.
 func (c *Cache) Invalidate(ctx context.Context, key string) error {
-	deleted, err := c.Storage.Del(ctx, key)
+	_, err := c.Storage.Del(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate cache for key %s: %w", key, err)
-	}
-
-	if !deleted {
-		return fmt.Errorf("cache key %s: %w", key, ErrKeyNotExists)
 	}
 
 	return nil
