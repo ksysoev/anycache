@@ -3,6 +3,7 @@ package inmemory
 import (
 	"container/list"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -15,16 +16,22 @@ type cacheItem struct {
 }
 
 type InMemoryCacheStorage struct {
+	limit uint
 	index map[string]*list.Element
 	items *list.List
 	mu    sync.RWMutex
 }
 
-func New() *InMemoryCacheStorage {
+func New(limit uint) (*InMemoryCacheStorage, error) {
+	if limit == 0 {
+		return nil, errors.New("limit must be greater than 0")
+	}
+
 	return &InMemoryCacheStorage{
 		index: map[string]*list.Element{},
 		items: list.New(),
-	}
+		limit: limit,
+	}, nil
 }
 
 func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error) {
