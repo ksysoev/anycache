@@ -5,6 +5,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/ksysoev/anycache"
 )
 
 type cacheItem struct {
@@ -13,22 +15,28 @@ type cacheItem struct {
 }
 
 type InMemoryCacheStorage struct {
-	index *sync.Map
+	index map[string]*list.Element
 	items *list.List
+	mu    sync.RWMutex
 }
 
 func New() *InMemoryCacheStorage {
 	return &InMemoryCacheStorage{
-		index: &sync.Map{},
+		index: map[string]*list.Element{},
 		items: list.New(),
 	}
 }
 
 func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error) {
-	return "", nil
+	value, _, err := s.GetWithTTL(context.Background(), key)
+
+	return value, err
 }
 
 func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, ttl time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	var expiry *time.Time
 
 	if ttl > 0 {
@@ -41,22 +49,72 @@ func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, 
 		expiry,
 	}
 
-	s.index.Store(key, storageItem)
-	s.items.PushBack(storageItem)
+	elem := &list.Element{
+		Value: storageItem,
+	}
+
+	s.index[key] = elem
+	s.items.PushBack(elem)
 
 	return nil
 }
 
-func TTL(_ context.Context, key string) (bool, time.Duration, error) {
-	return false, 0, nil
+func (s *InMemoryCacheStorage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
+	_, ttl, err := s.GetWithTTL(context.Background(), key)
+	if err != nil {
+		return false, 0, err
+	}
+
+	if ttl == 0 {
+		return false, 0, err
+	}
+
+	return true, ttl, nil
 }
 
-func Del(_ context.Context, key string) (bool, error) {
+func (s *InMemoryCacheStorage) Del(_ context.Context, key string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	elem, ok := s.index[key]
+
+	if !ok {
+		return false, nil
+	}
+
+	delete(s.index, key)
+
+	s.items.Remove(elem)
+
 	return false, nil
 }
 
-func GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
-	return "", 0, nil
+func (s *InMemoryCacheStorage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	item, ok := s.index[key]
+
+	if !ok {
+		return "", 0, anycache.ErrKeyNotExists
+	}
+
+	cacheItem, ok := item.Value.(*cacheItem)
+	if !ok {
+		return "", 0, anycache.ErrKeyNotExists
+	}
+
+	if cacheItem.expiry == nil {
+		return string(cacheItem.value), 0, nil
+	}
+
+	ttl := time.Until(*cacheItem.expiry)
+
+	if ttl <= 0 {
+		return "", 0, anycache.ErrKeyNotExists
+	}
+
+	return "", ttl, nil
 }
 
 func Close() error {
