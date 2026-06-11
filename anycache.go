@@ -27,7 +27,6 @@ type CacheStorage interface {
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
 	GetWithTTL(context.Context, string) (string, time.Duration, error)
-	Close() error
 }
 
 // Cache
@@ -203,6 +202,18 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 	err = json.Unmarshal([]byte(val), result)
 
 	return err
+}
+
+// Invalidate removes the cached value for the given key from the cache storage.
+// accepts a context and the key to be invalidated.
+// returns an error if there was a problem invalidating the cache for the key.
+func (c *Cache) Invalidate(ctx context.Context, key string) error {
+	_, err := c.Storage.Del(ctx, key)
+	if err != nil {
+		return fmt.Errorf("failed to invalidate cache for key %s: %w", key, err)
+	}
+
+	return nil
 }
 
 // generateAndSet generates a value using the provided generator function,
