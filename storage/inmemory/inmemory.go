@@ -1,6 +1,7 @@
 package inmemory
 
 import (
+	"container/heap"
 	"container/list"
 	"context"
 	"errors"
@@ -11,15 +12,19 @@ import (
 )
 
 type cacheItem struct {
-	expiry *time.Time
-	value  []byte
+	key       string
+	expiry    *time.Time
+	value     []byte
+	expiryPos int
+	lruPos    list.Element
 }
 
 type Storage struct {
-	index map[string]*list.Element
-	items *list.List
-	limit uint
-	mu    sync.RWMutex
+	index   map[string]*cacheItem
+	items   *list.List
+	expiryQ expiryQueue
+	limit   uint
+	mu      sync.RWMutex
 }
 
 func New(limit uint) (*Storage, error) {
@@ -27,10 +32,14 @@ func New(limit uint) (*Storage, error) {
 		return nil, errors.New("limit must be greater than 0")
 	}
 
+	expiryQ := make(expiryQueue, 0, limit)
+	heap.Init(&expiryQ)
+
 	return &Storage{
-		index: map[string]*list.Element{},
-		items: list.New(),
-		limit: limit,
+		index:   make(map[string]*cacheItem, limit),
+		items:   list.New(),
+		limit:   limit,
+		expiryQ: expiryQ,
 	}, nil
 }
 
@@ -51,21 +60,22 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	var expiry *time.Time
 
 	if ttl > 0 {
-		now := time.Now().Add(ttl)
-		expiry = &now
+		expTime := time.Now().Add(ttl)
+		expiry = &expTime
 	}
 
-	storageItem := &cacheItem{
+	elem := &list.Element{
+		Value: key,
+	}
+
+	item := &cacheItem{
 		value:  []byte(value),
 		expiry: expiry,
 	}
 
-	elem := &list.Element{
-		Value: storageItem,
-	}
-
-	s.index[key] = elem
+	s.index[key] = item
 	s.items.PushBack(elem)
+	s.expiryQ.Push(item)
 
 	return nil
 }
