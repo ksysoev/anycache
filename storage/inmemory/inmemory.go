@@ -15,32 +15,32 @@ type cacheItem struct {
 	value  []byte
 }
 
-type InMemoryCacheStorage struct {
+type Storage struct {
 	index map[string]*list.Element
 	items *list.List
 	limit uint
 	mu    sync.RWMutex
 }
 
-func New(limit uint) (*InMemoryCacheStorage, error) {
+func New(limit uint) (*Storage, error) {
 	if limit == 0 {
 		return nil, errors.New("limit must be greater than 0")
 	}
 
-	return &InMemoryCacheStorage{
+	return &Storage{
 		index: map[string]*list.Element{},
 		items: list.New(),
 		limit: limit,
 	}, nil
 }
 
-func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error) {
+func (s *Storage) Get(_ context.Context, key string) (string, error) {
 	value, _, err := s.GetWithTTL(context.Background(), key)
 
 	return value, err
 }
 
-func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, ttl time.Duration) error {
+func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) error {
 	if ttl < 0 {
 		return errors.New("ttl must be non-negative")
 	}
@@ -70,7 +70,7 @@ func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, 
 	return nil
 }
 
-func (s *InMemoryCacheStorage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
+func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
 	_, ttl, err := s.GetWithTTL(context.Background(), key)
 	if err != nil {
 		return false, 0, err
@@ -83,7 +83,7 @@ func (s *InMemoryCacheStorage) TTL(_ context.Context, key string) (bool, time.Du
 	return true, ttl, nil
 }
 
-func (s *InMemoryCacheStorage) Del(_ context.Context, key string) (bool, error) {
+func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -106,7 +106,7 @@ func (s *InMemoryCacheStorage) Del(_ context.Context, key string) (bool, error) 
 	return true, nil
 }
 
-func (s *InMemoryCacheStorage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
+func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

@@ -49,14 +49,14 @@ func TestNew(t *testing.T) {
 func TestInMemoryCacheStorage_Get(t *testing.T) {
 	tests := []struct {
 		name    string // description of this test case
-		setup   func(*testing.T) *InMemoryCacheStorage
+		setup   func(*testing.T) *Storage
 		key     string
 		want    string
 		wantErr bool
 	}{
 		{
 			name: "Successfully retrieve a value for an existing key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -64,7 +64,9 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				s.Set(t.Context(), "key1", "value1", 0)
+				if err := s.Set(t.Context(), "key1", "value1", 0); err != nil {
+					t.Fatalf("Failed to set key1: %v", err)
+				}
 
 				return s
 			},
@@ -74,7 +76,7 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 		},
 		{
 			name: "Fail to retrieve a value for a non-existing key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -90,7 +92,7 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 		},
 		{
 			name: "Fail to retrieve a value for an expired key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -98,7 +100,9 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				s.Set(t.Context(), "key2", "value2", time.Microsecond)
+				if err := s.Set(t.Context(), "key2", "value2", time.Microsecond); err != nil {
+					t.Fatalf("Failed to set key2: %v", err)
+				}
 
 				time.Sleep(2 * time.Millisecond)
 
@@ -216,7 +220,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 
 func TestInMemoryCacheStorage_TTL(t *testing.T) {
 	tests := []struct {
-		setup   func(*testing.T) *InMemoryCacheStorage
+		setup   func(*testing.T) *Storage
 		name    string
 		key     string
 		want2   time.Duration
@@ -226,7 +230,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 		{
 			name: "Successfully retrieve TTL for an existing key with no expiration",
 			key:  "key1",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -247,7 +251,9 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 		{
 			name: "Successfully retrieve TTL for an existing key with expiration",
 			key:  "key2",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
+				t.Helper()
+
 				s, err := New(10)
 				if err != nil {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
@@ -266,7 +272,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 		{
 			name: "Fail to retrieve TTL for a non-existing key",
 			key:  "nonExistingKey",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -307,11 +313,12 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 				t.Errorf("TTL() got = %v, want %v", got, tt.want)
 			}
 
-			if tt.want2 > 0 && got2 > 0 && tt.want2 < got2 {
+			switch {
+			case tt.want2 > 0 && got2 > 0 && tt.want2 < got2:
 				t.Errorf("TTL() got2 = %v, want approximately %v", got2, tt.want2)
-			} else if tt.want2 > 0 && got2 <= 0 {
+			case tt.want2 > 0 && got2 <= 0:
 				t.Errorf("TTL() got2 = %v, want approximately %v", got2, tt.want2)
-			} else if tt.want2 == 0 && got2 != 0 {
+			case tt.want2 == 0 && got2 != 0:
 				t.Errorf("TTL() got2 = %v, want %v", got2, tt.want2)
 			}
 		})
@@ -320,7 +327,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 
 func TestInMemoryCacheStorage_Del(t *testing.T) {
 	tests := []struct {
-		setup   func(*testing.T) *InMemoryCacheStorage
+		setup   func(*testing.T) *Storage
 		name    string
 		key     string
 		want    bool
@@ -329,7 +336,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 		{
 			name: "Successfully delete an existing key",
 			key:  "key1",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -349,7 +356,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 		{
 			name: "Fail to delete a non-existing key",
 			key:  "key2",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -369,7 +376,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 		{
 			name: "Remove expired key",
 			key:  "key3",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -416,7 +423,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 	tests := []struct {
 		name    string // description of this test case
-		setup   func(*testing.T) *InMemoryCacheStorage
+		setup   func(*testing.T) *Storage
 		key     string
 		want    string
 		want2   time.Duration
@@ -424,7 +431,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 	}{
 		{
 			name: "Successfully retrieve a value and TTL for an existing key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -445,7 +452,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 		},
 		{
 			name: "Fail to retrieve a value and TTL for a non-existing key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
@@ -466,7 +473,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 		},
 		{
 			name: "Fail to retrieve a value and TTL for an expired key",
-			setup: func(t *testing.T) *InMemoryCacheStorage {
+			setup: func(t *testing.T) *Storage {
 				t.Helper()
 
 				s, err := New(10)
