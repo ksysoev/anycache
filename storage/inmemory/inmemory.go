@@ -11,14 +11,14 @@ import (
 )
 
 type cacheItem struct {
-	value  []byte
 	expiry *time.Time
+	value  []byte
 }
 
 type InMemoryCacheStorage struct {
-	limit uint
 	index map[string]*list.Element
 	items *list.List
+	limit uint
 	mu    sync.RWMutex
 }
 
@@ -41,6 +41,10 @@ func (s *InMemoryCacheStorage) Get(_ context.Context, key string) (string, error
 }
 
 func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, ttl time.Duration) error {
+	if ttl < 0 {
+		return errors.New("ttl must be non-negative")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -52,8 +56,8 @@ func (s *InMemoryCacheStorage) Set(_ context.Context, key string, value string, 
 	}
 
 	storageItem := &cacheItem{
-		[]byte(value),
-		expiry,
+		value:  []byte(value),
+		expiry: expiry,
 	}
 
 	elem := &list.Element{
@@ -89,11 +93,17 @@ func (s *InMemoryCacheStorage) Del(_ context.Context, key string) (bool, error) 
 		return false, nil
 	}
 
+	_, err := exractItem(*elem)
+
 	delete(s.index, key)
 
 	s.items.Remove(elem)
 
-	return false, nil
+	if errors.Is(err, anycache.ErrKeyNotExists) {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func (s *InMemoryCacheStorage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
@@ -106,22 +116,43 @@ func (s *InMemoryCacheStorage) GetWithTTL(_ context.Context, key string) (string
 		return "", 0, anycache.ErrKeyNotExists
 	}
 
-	cacheItem, ok := item.Value.(*cacheItem)
+	cacheItem, err := exractItem(*item)
+
+	switch {
+	case errors.Is(err, anycache.ErrKeyNotExists):
+		delete(s.index, key)
+		s.items.Remove(item)
+
+		return "", 0, err
+	case err != nil:
+		return "", 0, err
+	}
+
+	var ttl time.Duration
+	if cacheItem.expiry != nil {
+		ttl = time.Until(*cacheItem.expiry)
+	}
+
+	return string(cacheItem.value), ttl, nil
+}
+
+func exractItem(el list.Element) (*cacheItem, error) {
+	cacheItem, ok := el.Value.(*cacheItem)
 	if !ok {
-		return "", 0, anycache.ErrKeyNotExists
+		return nil, anycache.ErrKeyNotExists
 	}
 
 	if cacheItem.expiry == nil {
-		return string(cacheItem.value), 0, nil
+		return cacheItem, nil
 	}
 
 	ttl := time.Until(*cacheItem.expiry)
 
 	if ttl <= 0 {
-		return "", 0, anycache.ErrKeyNotExists
+		return nil, anycache.ErrKeyNotExists
 	}
 
-	return "", ttl, nil
+	return cacheItem, nil
 }
 
 func Close() error {
