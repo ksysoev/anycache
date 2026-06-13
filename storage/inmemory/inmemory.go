@@ -145,7 +145,9 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 func (s *Storage) delete(item *cacheItem) {
 	delete(s.index, item.key)
 	s.items.Remove(item.lruPos)
-	heap.Remove(&s.expiryQ, item.expiryPos)
+	if item.expiryPos >= 0 {
+		heap.Remove(&s.expiryQ, item.expiryPos)
+	}
 }
 
 func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
