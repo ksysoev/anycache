@@ -134,6 +134,7 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	}
 
 	if item.expiry != nil && time.Until(*item.expiry) <= 0 {
+		s.delete(item)
 		return false, nil
 	}
 
