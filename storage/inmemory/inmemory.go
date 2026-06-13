@@ -165,6 +165,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 	}
 
 	if item.expiry == nil {
+		s.items.MoveToBack(item.lruPos)
 		return string(item.value), 0, nil
 	}
 
