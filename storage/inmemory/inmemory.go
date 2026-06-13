@@ -72,6 +72,10 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if existing, ok := s.index[key]; ok {
+		s.delete(existing)
+	}
+
 	if len(s.index) >= s.limit {
 		leastUsed := s.items.Front()
 		item, _ := leastUsed.Value.(*cacheItem)
