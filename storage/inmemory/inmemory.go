@@ -20,9 +20,12 @@ type cacheItem struct {
 }
 
 type Storage struct {
+	ctx     context.Context
 	index   map[string]*cacheItem
 	items   *list.List
+	cancel  context.CancelFunc
 	expiryQ expiryQueue
+	wg      sync.WaitGroup
 	limit   uint
 	mu      sync.RWMutex
 }
@@ -32,15 +35,23 @@ func New(limit uint) (*Storage, error) {
 		return nil, errors.New("limit must be greater than 0")
 	}
 
+	cancelCtx, cancel := context.WithCancel(context.Background())
+
 	expiryQ := make(expiryQueue, 0, limit)
 	heap.Init(&expiryQ)
 
-	return &Storage{
+	s := &Storage{
 		index:   make(map[string]*cacheItem, limit),
 		items:   list.New(),
 		limit:   limit,
 		expiryQ: expiryQ,
-	}, nil
+		ctx:     cancelCtx,
+		cancel:  cancel,
+	}
+
+	s.wg.Go(s.expiryLoop)
+
+	return s, nil
 }
 
 func (s *Storage) Get(_ context.Context, key string) (string, error) {
@@ -50,6 +61,10 @@ func (s *Storage) Get(_ context.Context, key string) (string, error) {
 }
 
 func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) error {
+	if s.ctx.Err() != nil {
+		return errors.New("storage is closed")
+	}
+
 	if ttl < 0 {
 		return errors.New("ttl must be non-negative")
 	}
@@ -95,6 +110,10 @@ func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error
 }
 
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
+	if s.ctx.Err() != nil {
+		return false, errors.New("storage is closed")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -119,6 +138,10 @@ func (s *Storage) delete(item *cacheItem) {
 }
 
 func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
+	if s.ctx.Err() != nil {
+		return "", 0, errors.New("storage is closed")
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -142,6 +165,39 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 	return string(item.value), ttl, nil
 }
 
-func Close() error {
+func (s *Storage) expiryLoop() {
+	ticker := time.NewTicker(time.Second)
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+			s.mu.Lock()
+			if s.expiryQ.Len() == 0 {
+				continue
+			}
+
+			for {
+				item := s.expiryQ[0]
+				if time.Until(*item.expiry) > 0 {
+					break
+				}
+
+				s.delete(item)
+			}
+			s.mu.Unlock()
+		}
+	}
+}
+
+func (s *Storage) Close() error {
+	if s.ctx.Err() != nil {
+		return errors.New("storage is already closed")
+	}
+
+	s.cancel()
+	s.wg.Wait()
+
 	return nil
 }

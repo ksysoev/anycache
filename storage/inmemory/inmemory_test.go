@@ -35,6 +35,8 @@ func TestNew(t *testing.T) {
 				return
 			}
 
+			defer func() { _ = got.Close() }()
+
 			if tt.wantErr {
 				t.Fatal("New() succeeded unexpectedly")
 			}
@@ -117,6 +119,8 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := tt.setup(t)
 
+			defer func() { _ = s.Close() }()
+
 			got, gotErr := s.Get(context.Background(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -189,6 +193,8 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 			if err != nil {
 				t.Fatalf("could not construct receiver type: %v", err)
 			}
+
+			defer func() { _ = s.Close() }()
 
 			gotErr := s.Set(t.Context(), tt.key, tt.value, tt.ttl)
 			if gotErr != nil {
@@ -296,6 +302,8 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := tt.setup(t)
 
+			defer func() { _ = s.Close() }()
+
 			got, got2, gotErr := s.TTL(context.Background(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -400,6 +408,8 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := tt.setup(t)
 
+			defer func() { _ = s.Close() }()
+
 			got, gotErr := s.Del(context.Background(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -498,6 +508,8 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := tt.setup(t)
 
+			defer func() { _ = s.Close() }()
+
 			got, got2, gotErr := s.GetWithTTL(context.Background(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -523,5 +535,42 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 				t.Errorf("GetWithTTL() = %v, want %v", got2, tt.want2)
 			}
 		})
+	}
+}
+
+func TestInMemoryCacheStorage_Close(t *testing.T) {
+	s, err := New(10)
+	if err != nil {
+		t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
+	}
+
+	err = s.Set(t.Context(), "key1", "value1", 0)
+	if err != nil {
+		t.Fatalf("Failed to set key1: %v", err)
+	}
+
+	_, err = s.Get(t.Context(), "key1")
+	if err != nil {
+		t.Fatalf("Failed to get key1: %v", err)
+	}
+
+	err = s.Close()
+	if err != nil {
+		t.Fatalf("Failed to close InMemoryCacheStorage: %v", err)
+	}
+
+	err = s.Set(t.Context(), "key2", "value2", 0)
+	if err == nil {
+		t.Fatal("Set() succeeded unexpectedly after Close()")
+	}
+
+	_, err = s.Get(t.Context(), "key1")
+	if err == nil {
+		t.Fatal("Get() succeeded unexpectedly after Close()")
+	}
+
+	err = s.Close()
+	if err == nil {
+		t.Fatal("Close() succeeded unexpectedly on already closed storage")
 	}
 }
