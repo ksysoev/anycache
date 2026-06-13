@@ -12,11 +12,11 @@ import (
 )
 
 type cacheItem struct {
-	key       string
 	expiry    *time.Time
+	lruPos    *list.Element
+	key       string
 	value     []byte
 	expiryPos int
-	lruPos    list.Element
 }
 
 type Storage struct {
@@ -71,6 +71,7 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	item := &cacheItem{
 		value:  []byte(value),
 		expiry: expiry,
+		lruPos: elem,
 	}
 
 	s.index[key] = item
@@ -97,23 +98,24 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	elem, ok := s.index[key]
-
+	item, ok := s.index[key]
 	if !ok {
 		return false, nil
 	}
 
-	_, err := exractItem(*elem)
-
-	delete(s.index, key)
-
-	s.items.Remove(elem)
-
-	if errors.Is(err, anycache.ErrKeyNotExists) {
+	if item.expiry != nil && time.Until(*item.expiry) <= 0 {
 		return false, nil
 	}
 
+	s.delete(item)
+
 	return true, nil
+}
+
+func (s *Storage) delete(item *cacheItem) {
+	delete(s.index, item.key)
+	s.items.Remove(item.lruPos)
+	heap.Remove(&s.expiryQ, item.expiryPos)
 }
 
 func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
@@ -126,43 +128,18 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 		return "", 0, anycache.ErrKeyNotExists
 	}
 
-	cacheItem, err := exractItem(*item)
-
-	switch {
-	case errors.Is(err, anycache.ErrKeyNotExists):
-		delete(s.index, key)
-		s.items.Remove(item)
-
-		return "", 0, err
-	case err != nil:
-		return "", 0, err
+	if item.expiry == nil {
+		return string(item.value), 0, nil
 	}
 
-	var ttl time.Duration
-	if cacheItem.expiry != nil {
-		ttl = time.Until(*cacheItem.expiry)
-	}
-
-	return string(cacheItem.value), ttl, nil
-}
-
-func exractItem(el list.Element) (*cacheItem, error) {
-	cacheItem, ok := el.Value.(*cacheItem)
-	if !ok {
-		return nil, anycache.ErrKeyNotExists
-	}
-
-	if cacheItem.expiry == nil {
-		return cacheItem, nil
-	}
-
-	ttl := time.Until(*cacheItem.expiry)
-
+	ttl := time.Until(*item.expiry)
 	if ttl <= 0 {
-		return nil, anycache.ErrKeyNotExists
+		s.delete(item)
+
+		return "", 0, anycache.ErrKeyNotExists
 	}
 
-	return cacheItem, nil
+	return string(item.value), ttl, nil
 }
 
 func Close() error {
