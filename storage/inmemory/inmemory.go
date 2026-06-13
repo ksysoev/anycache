@@ -184,7 +184,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 
 func (s *Storage) expiryLoop() {
 	ticker := time.NewTicker(time.Second)
-
+	defer ticker.Stop()
 	for {
 		select {
 		case <-s.ctx.Done():
