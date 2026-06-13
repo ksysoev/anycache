@@ -26,11 +26,11 @@ type Storage struct {
 	cancel  context.CancelFunc
 	expiryQ expiryQueue
 	wg      sync.WaitGroup
-	limit   uint
+	limit   int
 	mu      sync.RWMutex
 }
 
-func New(limit uint) (*Storage, error) {
+func New(limit int) (*Storage, error) {
 	if limit == 0 {
 		return nil, errors.New("limit must be greater than 0")
 	}
@@ -72,6 +72,12 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if len(s.index) >= s.limit {
+		leastUsed := s.items.Front()
+		item, _ := leastUsed.Value.(*cacheItem)
+		s.delete(item)
+	}
+
 	var expiry *time.Time
 
 	if ttl > 0 {
@@ -79,15 +85,16 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 		expiry = &expTime
 	}
 
-	elem := &list.Element{
-		Value: key,
-	}
-
 	item := &cacheItem{
 		value:  []byte(value),
 		expiry: expiry,
-		lruPos: elem,
 	}
+
+	elem := &list.Element{
+		Value: item,
+	}
+
+	item.lruPos = elem
 
 	s.index[key] = item
 	s.items.PushBack(elem)
@@ -161,6 +168,8 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 
 		return "", 0, anycache.ErrKeyNotExists
 	}
+
+	s.items.MoveToBack(item.lruPos)
 
 	return string(item.value), ttl, nil
 }

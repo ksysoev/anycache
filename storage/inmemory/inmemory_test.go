@@ -10,7 +10,7 @@ func TestNew(t *testing.T) {
 	tests := []struct {
 		name string // description of this test case
 		// Named input parameters for target function.
-		limit   uint
+		limit   int
 		wantErr bool
 	}{
 		{
