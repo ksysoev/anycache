@@ -146,6 +146,7 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 func (s *Storage) delete(item *cacheItem) {
 	delete(s.index, item.key)
 	s.items.Remove(item.lruPos)
+
 	if item.expiryPos >= 0 {
 		heap.Remove(&s.expiryQ, item.expiryPos)
 	}
@@ -185,17 +186,15 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 func (s *Storage) expiryLoop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
 			s.mu.Lock()
-			if s.expiryQ.Len() == 0 {
-				continue
-			}
 
-			for {
+			for s.expiryQ.Len() > 0 {
 				item := s.expiryQ[0]
 				if time.Until(*item.expiry) > 0 {
 					break
