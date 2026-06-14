@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-func getGenerator(val string, err error) CacheGenerator {
-	return func(_ context.Context) (string, error) {
+func getGenerator(val []byte, err error) CacheGenerator {
+	return func(_ context.Context) ([]byte, error) {
 		return val, err
 	}
 }
@@ -20,10 +20,10 @@ func TestCache(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 
-	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return("TestCacheKey", ErrKeyNotExists).Once()
+	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return(nil, ErrKeyNotExists).Once()
 	store.EXPECT().Set(mock.Anything, "TestCacheKey", "testValue", mock.Anything).Return(nil)
 
-	val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue", nil))
+	val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator([]byte("testValue"), nil))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -32,9 +32,9 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return("testValue", nil)
+	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return([]byte("testValue"), nil)
 
-	val, err = cache.Cache(t.Context(), "TestCacheKey", getGenerator("testValue1", nil))
+	val, err = cache.Cache(t.Context(), "TestCacheKey", getGenerator([]byte("testValue1"), nil))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -50,21 +50,21 @@ func TestCacheConcurrency(t *testing.T) {
 
 	results := make(chan string)
 
-	store.EXPECT().Get(mock.Anything, "TestCacheConcurrencyKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Get(mock.Anything, "TestCacheConcurrencyKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCacheConcurrencyKey", mock.Anything, mock.Anything).Return(nil)
 
 	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
+		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) ([]byte, error) {
 			time.Sleep(time.Millisecond)
-			return "testValue", nil
+			return []byte("testValue"), nil
 		})
 		ch <- val
 	}(cache, results)
 
 	go func(c *Cache, ch chan string) {
-		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) (string, error) {
+		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) ([]byte, error) {
 			time.Sleep(time.Millisecond)
-			return "testValue1", nil
+			return []byte("testValue1"), nil
 		})
 		ch <- val
 	}(cache, results)
@@ -84,10 +84,10 @@ func TestCacheWarmingUp(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 
-	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return("testValue", 500*time.Millisecond, nil)
+	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
 	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", "newTestValue", 2*time.Second).Return(nil)
 
-	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator("newTestValue", nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator([]byte("newTestValue"), nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -110,7 +110,7 @@ func TestRandomizeTTL(t *testing.T) {
 func TestCacheJSON(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
-	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", "{\"foo\":\"bar\"}", mock.Anything).Return(nil)
 	// Define a test key and value
 	key := "TestCacheJSONKey"
@@ -142,13 +142,13 @@ func TestCacheJSON(t *testing.T) {
 func TestCancelingRequest(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
-	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return("", ErrKeyNotExists)
+	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", "testValue", mock.Anything).Return(nil)
 
 	// Define a generator function that returns the test value
-	generator := func(ctx context.Context) (string, error) {
+	generator := func(ctx context.Context) ([]byte, error) {
 		<-ctx.Done()
-		return "testValue", nil
+		return []byte("testValue"), nil
 	}
 
 	// Call the CacheJSON function to cache the test value

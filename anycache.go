@@ -22,11 +22,11 @@ var ErrKeyNotExists = errors.New("key does not exist")
 
 // CacheStorage
 type CacheStorage interface {
-	Get(context.Context, string) (string, error)
-	Set(context.Context, string, string, time.Duration) error
+	Get(context.Context, string) ([]byte, error)
+	Set(context.Context, string, []byte, time.Duration) error
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
-	GetWithTTL(context.Context, string) (string, time.Duration, error)
+	GetWithTTL(context.Context, string) ([]byte, time.Duration, error)
 }
 
 // Cache
@@ -47,7 +47,7 @@ type CacheReuest struct {
 }
 
 type (
-	CacheGenerator func(ctx context.Context) (string, error)
+	CacheGenerator func(ctx context.Context) ([]byte, error)
 	CacheOptions   func(*Cache)
 )
 
@@ -180,18 +180,18 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
 func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
-	generatorWrapper := func(ctx context.Context) (string, error) {
+	generatorWrapper := func(ctx context.Context) ([]byte, error) {
 		val, err := generator(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		jsonVal, err := json.Marshal(val)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		return string(jsonVal), nil
+		return jsonVal, nil
 	}
 
 	val, err := c.Cache(ctx, key, generatorWrapper, opts...)
@@ -219,7 +219,7 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) (string, error) {
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) ([]byte, error) {
 	value, err := generator(ctx)
 	if err != nil {
 		return value, err
