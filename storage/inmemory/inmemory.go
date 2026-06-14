@@ -27,7 +27,7 @@ type Storage struct {
 	expiryQ expiryQueue
 	wg      sync.WaitGroup
 	limit   int
-	mu      sync.RWMutex
+	mu      sync.Mutex
 }
 
 func New(limit int) (*Storage, error) {
@@ -157,8 +157,8 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 		return "", 0, errors.New("storage is closed")
 	}
 
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	item, ok := s.index[key]
 
