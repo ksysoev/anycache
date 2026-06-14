@@ -30,6 +30,7 @@ type Storage struct {
 	mu      sync.Mutex
 }
 
+// New creates a new in-memory cache storage with the specified limit on the number of items.
 func New(limit int) (*Storage, error) {
 	if limit == 0 {
 		return nil, errors.New("limit must be greater than 0")
@@ -54,12 +55,14 @@ func New(limit int) (*Storage, error) {
 	return s, nil
 }
 
+// Get retrieves the value associated with the provided key from the in-memory cache storage.
 func (s *Storage) Get(_ context.Context, key string) (string, error) {
 	value, _, err := s.GetWithTTL(context.Background(), key)
 
 	return value, err
 }
 
+// Set stores a value associated with the provided key in the in-memory cache storage.
 func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) error {
 	if s.ctx.Err() != nil {
 		return errors.New("storage is closed")
@@ -107,6 +110,7 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	return nil
 }
 
+// TTL retrieves the time-to-live (TTL) associated with the provided key from the in-memory cache storage.
 func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
 	_, ttl, err := s.GetWithTTL(context.Background(), key)
 	if err != nil {
@@ -120,6 +124,7 @@ func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error
 	return true, ttl, nil
 }
 
+// Del deletes the value associated with the provided key from the in-memory cache storage.
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	if s.ctx.Err() != nil {
 		return false, errors.New("storage is closed")
@@ -143,15 +148,7 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-func (s *Storage) delete(item *cacheItem) {
-	delete(s.index, item.key)
-	s.items.Remove(item.lruPos)
-
-	if item.expiryPos >= 0 {
-		heap.Remove(&s.expiryQ, item.expiryPos)
-	}
-}
-
+// GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the in-memory cache storage.
 func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
 	if s.ctx.Err() != nil {
 		return "", 0, errors.New("storage is closed")
@@ -183,6 +180,29 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 	return string(item.value), ttl, nil
 }
 
+// Close gracefully shuts down the in-memory cache storage, ensuring that all resources are released and any ongoing operations are completed.
+func (s *Storage) Close() error {
+	if s.ctx.Err() != nil {
+		return errors.New("storage is already closed")
+	}
+
+	s.cancel()
+	s.wg.Wait()
+
+	return nil
+}
+
+// delete removes the item from the cache, including the index, LRU list, and expiry queue.
+func (s *Storage) delete(item *cacheItem) {
+	delete(s.index, item.key)
+	s.items.Remove(item.lruPos)
+
+	if item.expiryPos >= 0 {
+		heap.Remove(&s.expiryQ, item.expiryPos)
+	}
+}
+
+// expiryLoop continuously checks for expired items in the cache and removes them.
 func (s *Storage) expiryLoop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -205,15 +225,4 @@ func (s *Storage) expiryLoop() {
 			s.mu.Unlock()
 		}
 	}
-}
-
-func (s *Storage) Close() error {
-	if s.ctx.Err() != nil {
-		return errors.New("storage is already closed")
-	}
-
-	s.cancel()
-	s.wg.Wait()
-
-	return nil
 }
