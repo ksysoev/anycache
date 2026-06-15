@@ -28,9 +28,7 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
+	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
 
 	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return([]byte("testValue"), nil)
 
@@ -39,21 +37,19 @@ func TestCache(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
+	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
 }
 
 func TestCacheConcurrency(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 
-	results := make(chan string)
+	results := make(chan []byte)
 
 	store.EXPECT().Get(mock.Anything, "TestCacheConcurrencyKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCacheConcurrencyKey", mock.Anything, mock.Anything).Return(nil)
 
-	go func(c *Cache, ch chan string) {
+	go func(c *Cache, ch chan []byte) {
 		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) ([]byte, error) {
 			time.Sleep(time.Millisecond)
 			return []byte("testValue"), nil
@@ -61,7 +57,7 @@ func TestCacheConcurrency(t *testing.T) {
 		ch <- val
 	}(cache, results)
 
-	go func(c *Cache, ch chan string) {
+	go func(c *Cache, ch chan []byte) {
 		val, _ := c.Cache(t.Context(), "TestCacheConcurrencyKey", func(_ context.Context) ([]byte, error) {
 			time.Sleep(time.Millisecond)
 			return []byte("testValue1"), nil
@@ -71,13 +67,9 @@ func TestCacheConcurrency(t *testing.T) {
 
 	val1, val2 := <-results, <-results
 
-	if val1 != "testValue" && val1 != "testValue1" {
-		t.Errorf("Expected to get testValue as a result, but got '%v'", val1)
-	}
-
-	if val1 != val2 {
-		t.Errorf("Expected to get same result for concurent requests, but got '%v' and '%v", val1, val2)
-	}
+	assert.Contains(t, [][]byte{[]byte("testValue"), []byte("testValue1")}, val1, "Expected to get testValue or testValue1 as a result, but got '%v'", val1)
+	assert.Contains(t, [][]byte{[]byte("testValue"), []byte("testValue1")}, val2, "Expected to get testValue or testValue1 as a result, but got '%v'", val2)
+	assert.Equal(t, val1, val2, "Expected to get the same value for both calls, but got '%v' and '%v'", val1, val2)
 }
 
 func TestCacheWarmingUp(t *testing.T) {
@@ -92,9 +84,7 @@ func TestCacheWarmingUp(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
+	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
 
 	time.Sleep(time.Millisecond)
 }
@@ -161,9 +151,7 @@ func TestCancelingRequest(t *testing.T) {
 	}
 
 	// Check that the result variable contains the expected value
-	if result != "" {
-		t.Errorf("Cache returned an unexpected value: %v", result)
-	}
+	assert.Nil(t, result, "Expected to get nil result, but got '%v'", result)
 
 	cancel()
 

@@ -101,7 +101,7 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 // The function takes an optional list of CacheItemOptions to customize the caching behavior.
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
+func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) ([]byte, error) {
 	var req CacheReuest
 
 	for _, opt := range opts {
@@ -156,18 +156,18 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return nil, ctx.Err()
 	case resp := <-res:
 		if resp.Err != nil {
-			return "", resp.Err
+			return nil, resp.Err
 		}
 
 		val, ok := resp.Val.([]byte)
 		if !ok {
-			return "", errors.New("unexpected value type returned from generator")
+			return nil, errors.New("unexpected value type returned from generator")
 		}
 
-		return string(val), nil
+		return val, nil
 	}
 }
 
@@ -199,7 +199,7 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 		return err
 	}
 
-	err = json.Unmarshal([]byte(val), result)
+	err = json.Unmarshal(val, result)
 
 	return err
 }
