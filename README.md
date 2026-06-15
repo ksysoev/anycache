@@ -35,7 +35,7 @@ import (
 
     "github.com/redis/go-redis/v9"
     "github.com/ksysoev/anycache"
-    "github.com/ksysoev/anycache/storage/redis"
+    redisstore "github.com/ksysoev/anycache/storage/redis"
 )
 
 func main() {
@@ -43,10 +43,10 @@ func main() {
         Addr: "localhost:6379",
     })
 
-    redisStorage := redisstor.NewRedisCacheStorage(redisClient)
+    redisStorage := redisstor.New(redisClient)
 
     // Creates anycache with 10% TTL randomization
-    cache := anycache.NewCache(redisStorage, WithTTLRandomization(10))
+    cache := anycache.New(redisStorage, WithTTLRandomization(10))
     defer cache.Close()
 
     generator := func() (string, error) {
@@ -54,7 +54,7 @@ func main() {
         return fmt.Sprintf("%d", randomNumber), nil
     }
 
-    value, err := cache.Cache(
+    value, err := cache.CacheS(
         "random_number_key", 
         generator, 
         WithTTL(5 * time.Minute), 

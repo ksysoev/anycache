@@ -47,16 +47,17 @@ type CacheReuest struct {
 }
 
 type (
-	CacheGenerator func(ctx context.Context) ([]byte, error)
-	CacheOptions   func(*Cache)
+	CacheGenerator  func(ctx context.Context) ([]byte, error)
+	CacheGeneratorS func(ctx context.Context) (string, error)
+	CacheOptions    func(*Cache)
 )
 
 type CacheItemOptions func(*CacheReuest)
 
-// NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
+// New creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
-func NewCache(store CacheStorage, opts ...CacheOptions) *Cache {
+func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	c := Cache{
@@ -169,6 +170,25 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 
 		return val, nil
 	}
+}
+
+// CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
+func (c *Cache) CacheS(ctx context.Context, key string, generator CacheGeneratorS, opts ...CacheItemOptions) (string, error) {
+	generatorWrapper := func(ctx context.Context) ([]byte, error) {
+		result, err := generator(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return []byte(result), nil
+	}
+
+	val, err := c.Cache(ctx, key, generatorWrapper, opts...)
+	if err != nil {
+		return "", err
+	}
+
+	return string(val), nil
 }
 
 // CacheStruct caches the result of a function that returns a struct.

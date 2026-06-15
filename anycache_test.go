@@ -18,7 +18,7 @@ func getGenerator(val []byte, err error) CacheGenerator {
 
 func TestCache(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	cache := NewCache(store)
+	cache := New(store)
 
 	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return(nil, ErrKeyNotExists).Once()
 	store.EXPECT().Set(mock.Anything, "TestCacheKey", []byte("testValue"), mock.Anything).Return(nil)
@@ -42,7 +42,7 @@ func TestCache(t *testing.T) {
 
 func TestCacheConcurrency(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	cache := NewCache(store)
+	cache := New(store)
 
 	results := make(chan []byte)
 
@@ -74,7 +74,7 @@ func TestCacheConcurrency(t *testing.T) {
 
 func TestCacheWarmingUp(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	cache := NewCache(store)
+	cache := New(store)
 
 	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
 	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).Return(nil)
@@ -99,7 +99,7 @@ func TestRandomizeTTL(t *testing.T) {
 
 func TestCacheJSON(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	cache := NewCache(store)
+	cache := New(store)
 	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", []byte("{\"foo\":\"bar\"}"), mock.Anything).Return(nil)
 	// Define a test key and value
@@ -131,7 +131,7 @@ func TestCacheJSON(t *testing.T) {
 
 func TestCancelingRequest(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	cache := NewCache(store)
+	cache := New(store)
 	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", []byte("testValue"), mock.Anything).Return(nil)
 	// Define a generator function that returns the test value
@@ -206,7 +206,7 @@ func TestCache_Invalidate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			store := tt.setup()
-			c := NewCache(store)
+			c := New(store)
 
 			gotErr := c.Invalidate(t.Context(), tt.key)
 			if gotErr != nil {
