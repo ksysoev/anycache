@@ -29,6 +29,7 @@ Here's an example of how to use anycache to cache the result of a function that 
 package main
 
 import (
+    "context"
     "fmt"
     "math/rand"
     "time"

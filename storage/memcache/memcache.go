@@ -14,7 +14,7 @@ type Storage struct {
 	memcache *memcache.Client
 }
 
-// NewRedisCacheStorage creates a new RedisCacheStorage
+// New creates a new memcache cache storage with the provided memcache client.
 func New(client *memcache.Client) *Storage {
 	return &Storage{client}
 }
@@ -102,7 +102,7 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 }
 
 // GetWithTTL retrieves the value associated with the provided key from the Memcached cache storage.
-// It returns the value as a string, the time-to-live (TTL) as a time.Duration, and an error if any occurred.
+// It returns the value as a byte array, the time-to-live (TTL) as a time.Duration, and an error if any occurred.
 // Currently, the TTL is always returned as 0 because this function does not support retrieving the TTL from Memcached.
 // If the key does not exist or any other error occurs during the operation, it returns the error and the TTL as 0.
 func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, error) {

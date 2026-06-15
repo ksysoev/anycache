@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -93,6 +94,7 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	}
 
 	item := &cacheItem{
+		key:    key,
 		value:  value,
 		expiry: expiry,
 	}
@@ -165,7 +167,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 
 	if item.expiry == nil {
 		s.items.MoveToBack(item.lruPos)
-		return item.value, 0, nil
+		return slices.Clone(item.value), 0, nil
 	}
 
 	ttl := time.Until(*item.expiry)
@@ -177,7 +179,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 
 	s.items.MoveToBack(item.lruPos)
 
-	return item.value, ttl, nil
+	return slices.Clone(item.value), ttl, nil
 }
 
 // Close gracefully shuts down the in-memory cache storage, ensuring that all resources are released and any ongoing operations are completed.
