@@ -1,4 +1,4 @@
-package memcachestor
+package memcache
 
 import (
 	"context"
@@ -28,7 +28,7 @@ func getMemcachedHost() string {
 
 func TestMemcacheCacheStorageGet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
@@ -55,7 +55,7 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 
 func TestMemcacheCacheStorageSet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
@@ -84,7 +84,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 
 func TestMemcacheCacheStorageTTL(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
@@ -129,7 +129,7 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 func TestMemcacheCacheStorageDel(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 

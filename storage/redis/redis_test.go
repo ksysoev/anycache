@@ -1,4 +1,4 @@
-package redisstor
+package redis
 
 import (
 	"context"
@@ -29,7 +29,7 @@ func getRedisOptions() *redis.Options {
 
 func TestRedisCacheStorageGet(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
@@ -51,7 +51,7 @@ func TestRedisCacheStorageGet(t *testing.T) {
 
 func TestRedisCacheStorageSet(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
@@ -86,7 +86,7 @@ func TestRedisCacheStorageSet(t *testing.T) {
 
 func TestRedisCacheStorageTTL(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
@@ -125,7 +125,7 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 func TestRedisCacheStorageDel(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
