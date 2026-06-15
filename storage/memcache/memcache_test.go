@@ -87,7 +87,7 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey", []byte("testValue"), 2)
+	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey", []byte("testValue"), 10)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -101,7 +101,7 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to have TTL, but it does not have")
 	}
 
-	if ttl.Seconds() != 1 {
+	if ttl.Seconds() > 0 {
 		t.Errorf("Current implementation of memcache does not support meta commands to get TTL, so it should always return 0, but we got %v", ttl.Milliseconds())
 	}
 

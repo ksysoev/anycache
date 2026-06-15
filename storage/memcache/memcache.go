@@ -93,16 +93,16 @@ func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error
 		return false, 0, err
 	}
 
-	if item.ExpiresAtUnixMs == 0 {
+	if item.ExpiresAtUnix == 0 {
 		// Item was stored without a TTL.
 		return false, 0, nil
 	}
 
-	expiresAt := time.UnixMilli(item.ExpiresAtUnixMs)
+	expiresAt := time.Unix(item.ExpiresAtUnix, 0)
 	remaining := time.Until(expiresAt)
 
 	if remaining < 0 {
-		// Protobuf-layer expiry elapsed but Memcached hasn't evicted yet.
+		// Protobuf-layer expiry elapsed but Memcached hasn't evicted yet. we trust memcache more
 		return true, 0, nil
 	}
 
@@ -126,11 +126,11 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 		return nil, 0, err
 	}
 
-	if item.ExpiresAtUnixMs == 0 {
+	if item.ExpiresAtUnix == 0 {
 		return item.Value, 0, nil
 	}
 
-	expiresAt := time.UnixMilli(item.ExpiresAtUnixMs)
+	expiresAt := time.Unix(item.ExpiresAtUnix, 0)
 	remaining := time.Until(expiresAt)
 
 	if remaining <= 0 {
@@ -159,7 +159,7 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 func encode(value []byte, expiresAt time.Time) ([]byte, error) {
 	item := &pb.CachedItem{Value: value}
 	if !expiresAt.IsZero() {
-		item.ExpiresAtUnixMs = expiresAt.UnixMilli()
+		item.ExpiresAtUnix = expiresAt.Unix()
 	}
 
 	return proto.Marshal(item)

@@ -6,11 +6,11 @@ option go_package = "github.com/ksysoev/anycache/storage/memcache/proto";
 
 // CachedItem wraps a cache value together with an optional absolute
 // expiry timestamp so that TTL can be recovered on read-back.
-// When expires_at_unix_ms == 0 the item has no expiration.
+// When expires_at_unix == 0 the item has no expiration.
 message CachedItem {
   // The raw cache value.
   bytes value = 1;
 
-  // Absolute expiry as Unix milliseconds (0 = no expiration).
-  int64 expires_at_unix_ms = 2;
+  // Absolute expiry as Unixtime(0 = no expiration).
+  int64 expires_at_unix = 2;
 }
