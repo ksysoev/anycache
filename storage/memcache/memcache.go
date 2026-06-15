@@ -50,8 +50,10 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 		return errors.New("TTL value is too large")
 	}
 
-	var expiresAt time.Time
-	var expSeconds int32
+	var (
+		expiresAt  time.Time
+		expSeconds int32
+	)
 
 	if ttl > 0 {
 		expiresAt = time.Now().Add(ttl)
