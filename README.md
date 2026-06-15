@@ -46,7 +46,7 @@ func main() {
     redisStorage := redisstor.New(redisClient)
 
     // Creates anycache with 10% TTL randomization
-    cache := anycache.New(redisStorage, WithTTLRandomization(10))
+    cache := anycache.New(redisStorage, anycache.WithTTLRandomization(10))
     defer cache.Close()
 
     generator := func() (string, error) {
