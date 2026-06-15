@@ -20,34 +20,34 @@ func New(client *memcache.Client) *Storage {
 }
 
 // Get retrieves the value associated with the provided key from the Memcached cache storage.
-// It returns the value as a string and an error if any occurred.
-// If the key does not exist, it returns an empty string and a ErrKeyNotExists.
-// If any other error occurs during the operation, it returns an empty string and the error.
-func (s *Storage) Get(_ context.Context, key string) (string, error) {
+// It returns the value as a byte array and an error if any occurred.
+// If the key does not exist, it returns a nil and a ErrKeyNotExists.
+// If any other error occurs during the operation, it returns a nil and the error.
+func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 	item, err := s.memcache.Get(key)
 
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return "", anycache.ErrKeyNotExists
+		return nil, anycache.ErrKeyNotExists
 	}
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	return string(item.Value), nil
+	return item.Value, nil
 }
 
 // Set stores a value associated with the provided key in the Memcached cache storage.
 // It also accepts options which currently only includes TTL (time-to-live) for the key-value pair.
 // If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
 // If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
-func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) error {
+func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
 	if ttl.Seconds() > math.MaxInt32 {
 		return errors.New("TTL value is too large")
 	}
 
 	if ttl > 0 {
-		err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value), Expiration: int32(ttl.Seconds())})
+		err := s.memcache.Set(&memcache.Item{Key: key, Value: value, Expiration: int32(ttl.Seconds())})
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,7 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 		return nil
 	}
 
-	err := s.memcache.Set(&memcache.Item{Key: key, Value: []byte(value)})
+	err := s.memcache.Set(&memcache.Item{Key: key, Value: value})
 	if err != nil {
 		return err
 	}
@@ -105,16 +105,11 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 // It returns the value as a string, the time-to-live (TTL) as a time.Duration, and an error if any occurred.
 // Currently, the TTL is always returned as 0 because this function does not support retrieving the TTL from Memcached.
 // If the key does not exist or any other error occurs during the operation, it returns the error and the TTL as 0.
-func (s *Storage) GetWithTTL(ctx context.Context, key string) (string, time.Duration, error) {
+func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, error) {
 	value, err := s.Get(ctx, key)
 	if err != nil {
 		return value, 0, err
 	}
 
 	return value, 0, nil
-}
-
-// Close closes the connection to the Memcached server.
-func (s *Storage) Close() error {
-	return s.memcache.Close()
 }
