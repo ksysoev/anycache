@@ -11,6 +11,6 @@ message CachedItem {
   // The raw cache value.
   bytes value = 1;
 
-  // Absolute expiry as Unixtime(0 = no expiration).
+// Absolute expiry as Unix time (0 = no expiration).
   int64 expires_at_unix = 2;
 }
