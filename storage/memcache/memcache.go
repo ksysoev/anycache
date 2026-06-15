@@ -3,11 +3,17 @@ package memcache
 import (
 	"context"
 	"errors"
-	"math"
+	"fmt"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache"
+	pb "github.com/ksysoev/anycache/storage/memcache/proto"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	maxTTL = 30 * 24 * time.Hour // 30 days, the maximum TTL supported by Memcached
 )
 
 type Storage struct {
@@ -23,77 +29,100 @@ func New(client *memcache.Client) *Storage {
 // It returns the value as a byte array and an error if any occurred.
 // If the key does not exist, it returns a nil and a ErrKeyNotExists.
 // If any other error occurs during the operation, it returns a nil and the error.
-func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
-	item, err := s.memcache.Get(key)
+func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
+	val, _, err := s.GetWithTTL(ctx, key)
 
-	if errors.Is(err, memcache.ErrCacheMiss) {
-		return nil, anycache.ErrKeyNotExists
-	}
-
-	if err != nil {
-		return nil, err
-	}
-
-	return item.Value, nil
+	return val, err
 }
 
-// Set stores a value associated with the provided key in the Memcached cache storage.
-// It also accepts options which currently only includes TTL (time-to-live) for the key-value pair.
-// If the TTL is greater than 0, the key-value pair will be automatically removed from the cache after the TTL duration.
-// If the TTL is 0 or less, the key-value pair will persist in the cache until it is manually removed.
+// Set stores value under key with an optional TTL.
+// ttl <= 0 means the item never expires.
 func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
-	if ttl.Seconds() > math.MaxInt32 {
-		return errors.New("TTL value is too large")
+	if ttl > maxTTL {
+		return errors.New("ttl value is too large for memcache. Maximum allowed is 30 days")
 	}
+
+	var (
+		expiresAt  time.Time
+		expSeconds int32
+	)
 
 	if ttl > 0 {
-		err := s.memcache.Set(&memcache.Item{Key: key, Value: value, Expiration: int32(ttl.Seconds())})
-		if err != nil {
-			return err
-		}
+		expiresAt = time.Now().Add(ttl)
+		expSeconds = int32(ttl.Seconds())
 
-		return nil
+		if expSeconds <= 0 {
+			return errors.New("ttl value is too small, must be at least 1 second")
+		}
 	}
 
-	err := s.memcache.Set(&memcache.Item{Key: key, Value: value})
+	data, err := encode(value, expiresAt)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	return s.memcache.Set(&memcache.Item{
+		Key:        key,
+		Value:      data,
+		Expiration: expSeconds,
+	})
 }
 
-// TTL retrieves the time-to-live (TTL) for the provided key from the Memcached cache storage.
-// It returns a boolean indicating whether the key has a TTL, the TTL as a time.Duration, and an error if any occurred.
-// If the key does not exist, it returns false, a zero duration, and a ErrKeyNotExists.
-// If the key exists but does not have an expiration, it returns false, a zero duration, and nil error.
-// If the key exists and has an expiration, it returns true, the TTL, and nil error.
-func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
-	var ttl time.Duration
+// TTL returns the remaining TTL for key.
+//
+//   - (false, 0, ErrKeyNotExists) – key not found or already past its expiry.
+//   - (false, 0, nil)             – key exists but has no expiration.
+//   - (true,  d, nil)             – key exists and expires in d.
+func (s *Storage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+	_, ttl, err := s.GetWithTTL(ctx, key)
 
-	hasTTL := false
-	item, err := s.memcache.Get(key)
+	if ttl > 0 {
+		return true, ttl, err
+	}
+
+	return false, ttl, err
+}
+
+// GetWithTTL retrieves both the value and its remaining TTL in one call.
+func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
+	raw, err := s.memcache.Get(key)
 
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return hasTTL, ttl, anycache.ErrKeyNotExists
+		return nil, 0, anycache.ErrKeyNotExists
 	}
 
 	if err != nil {
-		return hasTTL, ttl, err
+		return nil, 0, err
 	}
 
-	if item.Expiration > 0 {
-		return true, time.Duration(item.Expiration) * time.Second, nil
+	item, err := decode(raw.Value)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	return false, 0, nil
+	if item.ExpiresAtUnix == 0 {
+		return item.Value, 0, nil
+	}
+
+	expiresAt := time.Unix(item.ExpiresAtUnix, 0)
+	remaining := time.Until(expiresAt)
+
+	if remaining <= 0 {
+		// we trust that memcache will not return expired items
+		// but incase app servers got incorrect time then we just return 0 TTl and let memcache expire the item on next access
+		return item.Value, 0, nil
+	}
+
+	return item.Value, remaining, nil
 }
 
-// Del deletes the value associated with the provided key from the Memcached cache storage.
-// It returns a boolean indicating whether the deletion was successful, and an error if any occurred.
-// If the key does not exist or any other error occurs during the operation, it returns false and the error.
+// Del deletes key. Returns (false, nil) if the key did not exist.
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
+	if errors.Is(err, memcache.ErrCacheMiss) {
+		return false, nil
+	}
+
 	if err != nil {
 		return false, err
 	}
@@ -101,15 +130,23 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// GetWithTTL retrieves the value associated with the provided key from the Memcached cache storage.
-// It returns the value as a byte array, the time-to-live (TTL) as a time.Duration, and an error if any occurred.
-// Currently, the TTL is always returned as 0 because this function does not support retrieving the TTL from Memcached.
-// If the key does not exist or any other error occurs during the operation, it returns the error and the TTL as 0.
-func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, error) {
-	value, err := s.Get(ctx, key)
-	if err != nil {
-		return value, 0, err
+// encode serialises value + optional expiry into a protobuf CachedItem.
+// expiresAt zero means no TTL.
+func encode(value []byte, expiresAt time.Time) ([]byte, error) {
+	item := &pb.CachedItem{Value: value}
+	if !expiresAt.IsZero() {
+		item.ExpiresAtUnix = expiresAt.Unix()
 	}
 
-	return value, 0, nil
+	return proto.Marshal(item)
+}
+
+// decode deserialises a protobuf CachedItem from raw bytes.
+func decode(raw []byte) (*pb.CachedItem, error) {
+	item := &pb.CachedItem{}
+	if err := proto.Unmarshal(raw, item); err != nil {
+		return nil, fmt.Errorf("failed to decode cached item: %w", err)
+	}
+
+	return item, nil
 }
