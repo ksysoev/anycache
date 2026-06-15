@@ -101,9 +101,9 @@ func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error
 	expiresAt := time.UnixMilli(item.ExpiresAtUnixMs)
 	remaining := time.Until(expiresAt)
 
-	if remaining <= 0 {
+	if remaining < 0 {
 		// Protobuf-layer expiry elapsed but Memcached hasn't evicted yet.
-		return false, 0, anycache.ErrKeyNotExists
+		return true, 0, nil
 	}
 
 	return true, remaining, nil

@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package memcachestor;
+package memcache;
 
 option go_package = "github.com/ksysoev/anycache/storage/memcache/proto";
 
