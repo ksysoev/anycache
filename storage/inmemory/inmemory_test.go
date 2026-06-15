@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"gotest.tools/v3/assert"
 )
 
 func TestNew(t *testing.T) {
@@ -66,7 +68,7 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err := s.Set(t.Context(), "key1", "value1", 0); err != nil {
+				if err := s.Set(t.Context(), "key1", []byte("value1"), 0); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -102,7 +104,7 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err := s.Set(t.Context(), "key2", "value2", time.Microsecond); err != nil {
+				if err := s.Set(t.Context(), "key2", []byte("value2"), time.Microsecond); err != nil {
 					t.Fatalf("Failed to set key2: %v", err)
 				}
 
@@ -134,9 +136,7 @@ func TestInMemoryCacheStorage_Get(t *testing.T) {
 				t.Fatal("Get() succeeded unexpectedly")
 			}
 
-			if tt.want != got {
-				t.Errorf("Get() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, string(got), "Expected to get %v, but got '%v'", tt.want, string(got))
 		})
 	}
 }
@@ -145,7 +145,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 	tests := []struct {
 		name          string
 		key           string
-		value         string
+		value         []byte
 		ttl           time.Duration
 		waitBeforeGet time.Duration
 		wantErr       bool
@@ -154,7 +154,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 		{
 			name:          "Successfully set a value for a key with no TTL",
 			key:           "key1",
-			value:         "value1",
+			value:         []byte("value1"),
 			wantErr:       false,
 			waitBeforeGet: 0,
 			ableToGet:     true,
@@ -162,7 +162,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 		{
 			name:          "Successfully set a value for a key with a TTL and retrieve it before expiration",
 			key:           "key2",
-			value:         "value2",
+			value:         []byte("value2"),
 			ttl:           2 * time.Millisecond,
 			wantErr:       false,
 			waitBeforeGet: time.Millisecond,
@@ -171,7 +171,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 		{
 			name:          "Successfully set a value for a key with a TTL and fail to retrieve it after expiration",
 			key:           "key3",
-			value:         "value3",
+			value:         []byte("value3"),
 			ttl:           time.Millisecond,
 			wantErr:       false,
 			waitBeforeGet: 2 * time.Millisecond,
@@ -180,7 +180,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 		{
 			name:          "Error when setting a value for a key with an invalid TTL",
 			key:           "key4",
-			value:         "value4",
+			value:         []byte("value4"),
 			ttl:           -time.Second,
 			wantErr:       true,
 			waitBeforeGet: 0,
@@ -215,10 +215,10 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 
 			value, err := s.Get(t.Context(), tt.key)
 
-			if tt.ableToGet && tt.value != value {
-				t.Errorf("Get() = %v, want %v, err %v", value, tt.value, err)
-			} else if !tt.ableToGet && err == nil {
-				t.Fatal("Get() succeeded unexpectedly")
+			if tt.ableToGet {
+				assert.Equal(t, tt.value, value, "Expected to get %v, but got '%v'", tt.value, value)
+			} else {
+				assert.Error(t, err, "Expected to get an error, but got nil")
 			}
 		})
 	}
@@ -244,7 +244,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key1", "value1", 0); err != nil {
+				if err = s.Set(t.Context(), "key1", []byte("value1"), 0); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -265,7 +265,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key2", "value2", time.Millisecond); err != nil {
+				if err = s.Set(t.Context(), "key2", []byte("value2"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key2: %v", err)
 				}
 
@@ -286,7 +286,7 @@ func TestInMemoryCacheStorage_TTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key3", "value3", time.Millisecond); err != nil {
+				if err = s.Set(t.Context(), "key3", []byte("value3"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key3: %v", err)
 				}
 
@@ -352,7 +352,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err := s.Set(t.Context(), "key1", "value1", 0); err != nil {
+				if err := s.Set(t.Context(), "key1", []byte("value1"), 0); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -372,7 +372,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err := s.Set(t.Context(), "key1", "value1", 0); err != nil {
+				if err := s.Set(t.Context(), "key1", []byte("value1"), 0); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -392,7 +392,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err := s.Set(t.Context(), "key3", "value3", time.Millisecond); err != nil {
+				if err := s.Set(t.Context(), "key3", []byte("value3"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key3: %v", err)
 				}
 
@@ -449,7 +449,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key1", "value1", time.Millisecond); err != nil {
+				if err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -470,7 +470,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key1", "value1", time.Millisecond); err != nil {
+				if err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key1: %v", err)
 				}
 
@@ -491,7 +491,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 				}
 
-				if err = s.Set(t.Context(), "key2", "value2", time.Millisecond); err != nil {
+				if err = s.Set(t.Context(), "key2", []byte("value2"), time.Millisecond); err != nil {
 					t.Fatalf("Failed to set key2: %v", err)
 				}
 
@@ -523,9 +523,7 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 				t.Fatal("GetWithTTL() succeeded unexpectedly")
 			}
 
-			if tt.want != got {
-				t.Errorf("GetWithTTL() = %v, want %v", got, tt.want)
-			}
+			assert.Equal(t, tt.want, string(got), "Expected to get %v, but got '%v'", tt.want, string(got))
 
 			if tt.want2 > 0 && got2 > 0 && tt.want2 < got2 {
 				t.Errorf("GetWithTTL() = %v, want %v", got2, tt.want2)
@@ -544,7 +542,7 @@ func TestInMemoryCacheStorage_Close(t *testing.T) {
 		t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
 	}
 
-	err = s.Set(t.Context(), "key1", "value1", 0)
+	err = s.Set(t.Context(), "key1", []byte("value1"), 0)
 	if err != nil {
 		t.Fatalf("Failed to set key1: %v", err)
 	}
@@ -559,7 +557,7 @@ func TestInMemoryCacheStorage_Close(t *testing.T) {
 		t.Fatalf("Failed to close InMemoryCacheStorage: %v", err)
 	}
 
-	err = s.Set(t.Context(), "key2", "value2", 0)
+	err = s.Set(t.Context(), "key2", []byte("value2"), 0)
 	if err == nil {
 		t.Fatal("Set() succeeded unexpectedly after Close()")
 	}
