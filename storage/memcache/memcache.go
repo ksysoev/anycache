@@ -39,7 +39,7 @@ func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
 // ttl <= 0 means the item never expires.
 func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
 	if ttl > maxTTL {
-		return errors.New("ttl value is too large for memcache. Maximum allowed is 30 days.")
+		return errors.New("ttl value is too large for memcache. Maximum allowed is 30 days")
 	}
 
 	var (
