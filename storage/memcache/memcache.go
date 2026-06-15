@@ -3,13 +3,17 @@ package memcache
 import (
 	"context"
 	"errors"
-	"math"
+	"fmt"
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache"
 	pb "github.com/ksysoev/anycache/storage/memcache/proto"
 	"google.golang.org/protobuf/proto"
+)
+
+const (
+	maxTTL = 30 * 24 * time.Hour // 30 days, the maximum TTL supported by Memcached
 )
 
 type Storage struct {
@@ -25,29 +29,17 @@ func New(client *memcache.Client) *Storage {
 // It returns the value as a byte array and an error if any occurred.
 // If the key does not exist, it returns a nil and a ErrKeyNotExists.
 // If any other error occurs during the operation, it returns a nil and the error.
-func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
-	raw, err := s.memcache.Get(key)
-	if errors.Is(err, memcache.ErrCacheMiss) {
-		return nil, anycache.ErrKeyNotExists
-	}
+func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
+	val, _, err := s.GetWithTTL(ctx, key)
 
-	if err != nil {
-		return nil, err
-	}
-
-	item, err := decode(raw.Value)
-	if err != nil {
-		return nil, err
-	}
-
-	return item.Value, nil
+	return val, err
 }
 
 // Set stores value under key with an optional TTL.
 // ttl <= 0 means the item never expires.
 func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
-	if ttl.Seconds() > math.MaxInt32 {
-		return errors.New("TTL value is too large")
+	if ttl > maxTTL {
+		return errors.New("ttl value is too large for memcache. Maximum allowed is 30 days.")
 	}
 
 	var (
@@ -58,6 +50,10 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	if ttl > 0 {
 		expiresAt = time.Now().Add(ttl)
 		expSeconds = int32(ttl.Seconds())
+
+		if expSeconds <= 0 {
+			return errors.New("ttl value is too small, must be at least 1 second")
+		}
 	}
 
 	data, err := encode(value, expiresAt)
@@ -77,36 +73,14 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 //   - (false, 0, ErrKeyNotExists) – key not found or already past its expiry.
 //   - (false, 0, nil)             – key exists but has no expiration.
 //   - (true,  d, nil)             – key exists and expires in d.
-func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
-	raw, err := s.memcache.Get(key)
+func (s *Storage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+	_, ttl, err := s.GetWithTTL(ctx, key)
 
-	if errors.Is(err, memcache.ErrCacheMiss) {
-		return false, 0, anycache.ErrKeyNotExists
+	if ttl > 0 {
+		return true, ttl, err
 	}
 
-	if err != nil {
-		return false, 0, err
-	}
-
-	item, err := decode(raw.Value)
-	if err != nil {
-		return false, 0, err
-	}
-
-	if item.ExpiresAtUnix == 0 {
-		// Item was stored without a TTL.
-		return false, 0, nil
-	}
-
-	expiresAt := time.Unix(item.ExpiresAtUnix, 0)
-	remaining := time.Until(expiresAt)
-
-	if remaining < 0 {
-		// Protobuf-layer expiry elapsed but Memcached hasn't evicted yet. we trust memcache more
-		return true, 0, nil
-	}
-
-	return true, remaining, nil
+	return false, ttl, err
 }
 
 // GetWithTTL retrieves both the value and its remaining TTL in one call.
@@ -134,7 +108,9 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 	remaining := time.Until(expiresAt)
 
 	if remaining <= 0 {
-		return nil, 0, anycache.ErrKeyNotExists
+		// we trust that memcache will not return expired items
+		// but incase app servers got incorrect time then we just return 0 TTl and let memcache expire the item on next access
+		return item.Value, 0, nil
 	}
 
 	return item.Value, remaining, nil
@@ -144,7 +120,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return false, anycache.ErrKeyNotExists
+		return false, nil
 	}
 
 	if err != nil {
@@ -169,7 +145,7 @@ func encode(value []byte, expiresAt time.Time) ([]byte, error) {
 func decode(raw []byte) (*pb.CachedItem, error) {
 	item := &pb.CachedItem{}
 	if err := proto.Unmarshal(raw, item); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to decode cached item: %w", err)
 	}
 
 	return item, nil

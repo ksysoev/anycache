@@ -87,7 +87,7 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 	ctx := context.Background()
 
-	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey", []byte("testValue"), 10)
+	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey", []byte("testValue"), 10*time.Second)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
