@@ -21,7 +21,7 @@ func TestCache(t *testing.T) {
 	cache := NewCache(store)
 
 	store.EXPECT().Get(mock.Anything, "TestCacheKey").Return(nil, ErrKeyNotExists).Once()
-	store.EXPECT().Set(mock.Anything, "TestCacheKey", "testValue", mock.Anything).Return(nil)
+	store.EXPECT().Set(mock.Anything, "TestCacheKey", []byte("testValue"), mock.Anything).Return(nil)
 
 	val, err := cache.Cache(t.Context(), "TestCacheKey", getGenerator([]byte("testValue"), nil))
 	if err != nil {
@@ -85,7 +85,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	cache := NewCache(store)
 
 	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
-	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", "newTestValue", 2*time.Second).Return(nil)
+	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).Return(nil)
 
 	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", getGenerator([]byte("newTestValue"), nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
 	if err != nil {
@@ -111,7 +111,7 @@ func TestCacheJSON(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return(nil, ErrKeyNotExists)
-	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", "{\"foo\":\"bar\"}", mock.Anything).Return(nil)
+	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", []byte("{\"foo\":\"bar\"}"), mock.Anything).Return(nil)
 	// Define a test key and value
 	key := "TestCacheJSONKey"
 	value := map[string]string{
@@ -143,8 +143,7 @@ func TestCancelingRequest(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := NewCache(store)
 	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return(nil, ErrKeyNotExists)
-	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", "testValue", mock.Anything).Return(nil)
-
+	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", []byte("testValue"), mock.Anything).Return(nil)
 	// Define a generator function that returns the test value
 	generator := func(ctx context.Context) ([]byte, error) {
 		<-ctx.Done()

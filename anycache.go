@@ -162,12 +162,12 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			return "", resp.Err
 		}
 
-		val, ok := resp.Val.(string)
+		val, ok := resp.Val.([]byte)
 		if !ok {
 			return "", errors.New("unexpected value type returned from generator")
 		}
 
-		return val, nil
+		return string(val), nil
 	}
 }
 
