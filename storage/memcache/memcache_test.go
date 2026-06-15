@@ -10,7 +10,7 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func getMemcachedHost() string {
