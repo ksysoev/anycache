@@ -43,7 +43,7 @@ func main() {
         Addr: "localhost:6379",
     })
 
-    redisStorage := redisstor.New(redisClient)
+    redisStorage := redisstore.New(redisClient)
 
     // Creates anycache with 10% TTL randomization
     cache := anycache.New(redisStorage, anycache.WithTTLRandomization(10))
