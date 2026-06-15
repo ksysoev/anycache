@@ -116,7 +116,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 	return item.Value, remaining, nil
 }
 
-// Del deletes key. Returns (false, ErrKeyNotExists) if the key did not exist.
+// Del deletes key. Returns (false, nil) if the key did not exist.
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	err := s.memcache.Delete(key)
 	if errors.Is(err, memcache.ErrCacheMiss) {
