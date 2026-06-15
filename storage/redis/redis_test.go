@@ -1,4 +1,4 @@
-package redisstor
+package redis
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/ksysoev/anycache"
 	"github.com/redis/go-redis/v9"
+	"github.com/stretchr/testify/assert"
 )
 
 func getRedisOptions() *redis.Options {
@@ -28,7 +29,7 @@ func getRedisOptions() *redis.Options {
 
 func TestRedisCacheStorageGet(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
@@ -39,9 +40,7 @@ func TestRedisCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if value != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", value)
-	}
+	assert.Equal(t, []byte("testValue"), value, "Expected to get testValue, but got '%v'", value)
 
 	_, err = redisStore.Get(ctx, "TestRedisCacheStorageGetKey1")
 
@@ -52,11 +51,11 @@ func TestRedisCacheStorageGet(t *testing.T) {
 
 func TestRedisCacheStorageSet(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
-	err := redisStore.Set(ctx, "TestRedisCacheStorageSetKey", "testValue", 0)
+	err := redisStore.Set(ctx, "TestRedisCacheStorageSetKey", []byte("testValue"), 0)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -67,7 +66,7 @@ func TestRedisCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", val)
 	}
 
-	err = redisStore.Set(ctx, "TestRedisCacheStorageSetKey1", "testValue", 2*time.Second)
+	err = redisStore.Set(ctx, "TestRedisCacheStorageSetKey1", []byte("testValue"), 2*time.Second)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -87,7 +86,7 @@ func TestRedisCacheStorageSet(t *testing.T) {
 
 func TestRedisCacheStorageTTL(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 
@@ -126,7 +125,7 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 func TestRedisCacheStorageDel(t *testing.T) {
 	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := NewRedisCacheStorage(redisClient)
+	redisStore := New(redisClient)
 
 	ctx := context.Background()
 

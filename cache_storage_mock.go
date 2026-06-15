@@ -24,51 +24,6 @@ func (_m *MockCacheStorage) EXPECT() *MockCacheStorage_Expecter {
 	return &MockCacheStorage_Expecter{mock: &_m.Mock}
 }
 
-// Close provides a mock function with no fields
-func (_m *MockCacheStorage) Close() error {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Close")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockCacheStorage_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
-type MockCacheStorage_Close_Call struct {
-	*mock.Call
-}
-
-// Close is a helper method to define mock.On call
-func (_e *MockCacheStorage_Expecter) Close() *MockCacheStorage_Close_Call {
-	return &MockCacheStorage_Close_Call{Call: _e.mock.On("Close")}
-}
-
-func (_c *MockCacheStorage_Close_Call) Run(run func()) *MockCacheStorage_Close_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCacheStorage_Close_Call) Return(_a0 error) *MockCacheStorage_Close_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockCacheStorage_Close_Call) RunAndReturn(run func() error) *MockCacheStorage_Close_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Del provides a mock function with given fields: _a0, _a1
 func (_m *MockCacheStorage) Del(_a0 context.Context, _a1 string) (bool, error) {
 	ret := _m.Called(_a0, _a1)
@@ -127,22 +82,24 @@ func (_c *MockCacheStorage_Del_Call) RunAndReturn(run func(context.Context, stri
 }
 
 // Get provides a mock function with given fields: _a0, _a1
-func (_m *MockCacheStorage) Get(_a0 context.Context, _a1 string) (string, error) {
+func (_m *MockCacheStorage) Get(_a0 context.Context, _a1 string) ([]byte, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Get")
 	}
 
-	var r0 string
+	var r0 []byte
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]byte, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
 		r0 = rf(_a0, _a1)
 	} else {
-		r0 = ret.Get(0).(string)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
@@ -173,34 +130,36 @@ func (_c *MockCacheStorage_Get_Call) Run(run func(_a0 context.Context, _a1 strin
 	return _c
 }
 
-func (_c *MockCacheStorage_Get_Call) Return(_a0 string, _a1 error) *MockCacheStorage_Get_Call {
+func (_c *MockCacheStorage_Get_Call) Return(_a0 []byte, _a1 error) *MockCacheStorage_Get_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCacheStorage_Get_Call) RunAndReturn(run func(context.Context, string) (string, error)) *MockCacheStorage_Get_Call {
+func (_c *MockCacheStorage_Get_Call) RunAndReturn(run func(context.Context, string) ([]byte, error)) *MockCacheStorage_Get_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetWithTTL provides a mock function with given fields: _a0, _a1
-func (_m *MockCacheStorage) GetWithTTL(_a0 context.Context, _a1 string) (string, time.Duration, error) {
+func (_m *MockCacheStorage) GetWithTTL(_a0 context.Context, _a1 string) ([]byte, time.Duration, error) {
 	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetWithTTL")
 	}
 
-	var r0 string
+	var r0 []byte
 	var r1 time.Duration
 	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (string, time.Duration, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]byte, time.Duration, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string) []byte); ok {
 		r0 = rf(_a0, _a1)
 	} else {
-		r0 = ret.Get(0).(string)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]byte)
+		}
 	}
 
 	if rf, ok := ret.Get(1).(func(context.Context, string) time.Duration); ok {
@@ -237,18 +196,18 @@ func (_c *MockCacheStorage_GetWithTTL_Call) Run(run func(_a0 context.Context, _a
 	return _c
 }
 
-func (_c *MockCacheStorage_GetWithTTL_Call) Return(_a0 string, _a1 time.Duration, _a2 error) *MockCacheStorage_GetWithTTL_Call {
+func (_c *MockCacheStorage_GetWithTTL_Call) Return(_a0 []byte, _a1 time.Duration, _a2 error) *MockCacheStorage_GetWithTTL_Call {
 	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *MockCacheStorage_GetWithTTL_Call) RunAndReturn(run func(context.Context, string) (string, time.Duration, error)) *MockCacheStorage_GetWithTTL_Call {
+func (_c *MockCacheStorage_GetWithTTL_Call) RunAndReturn(run func(context.Context, string) ([]byte, time.Duration, error)) *MockCacheStorage_GetWithTTL_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Set provides a mock function with given fields: _a0, _a1, _a2, _a3
-func (_m *MockCacheStorage) Set(_a0 context.Context, _a1 string, _a2 string, _a3 time.Duration) error {
+func (_m *MockCacheStorage) Set(_a0 context.Context, _a1 string, _a2 []byte, _a3 time.Duration) error {
 	ret := _m.Called(_a0, _a1, _a2, _a3)
 
 	if len(ret) == 0 {
@@ -256,7 +215,7 @@ func (_m *MockCacheStorage) Set(_a0 context.Context, _a1 string, _a2 string, _a3
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string, time.Duration) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, string, []byte, time.Duration) error); ok {
 		r0 = rf(_a0, _a1, _a2, _a3)
 	} else {
 		r0 = ret.Error(0)
@@ -273,15 +232,15 @@ type MockCacheStorage_Set_Call struct {
 // Set is a helper method to define mock.On call
 //   - _a0 context.Context
 //   - _a1 string
-//   - _a2 string
+//   - _a2 []byte
 //   - _a3 time.Duration
 func (_e *MockCacheStorage_Expecter) Set(_a0 interface{}, _a1 interface{}, _a2 interface{}, _a3 interface{}) *MockCacheStorage_Set_Call {
 	return &MockCacheStorage_Set_Call{Call: _e.mock.On("Set", _a0, _a1, _a2, _a3)}
 }
 
-func (_c *MockCacheStorage_Set_Call) Run(run func(_a0 context.Context, _a1 string, _a2 string, _a3 time.Duration)) *MockCacheStorage_Set_Call {
+func (_c *MockCacheStorage_Set_Call) Run(run func(_a0 context.Context, _a1 string, _a2 []byte, _a3 time.Duration)) *MockCacheStorage_Set_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(time.Duration))
+		run(args[0].(context.Context), args[1].(string), args[2].([]byte), args[3].(time.Duration))
 	})
 	return _c
 }
@@ -291,7 +250,7 @@ func (_c *MockCacheStorage_Set_Call) Return(_a0 error) *MockCacheStorage_Set_Cal
 	return _c
 }
 
-func (_c *MockCacheStorage_Set_Call) RunAndReturn(run func(context.Context, string, string, time.Duration) error) *MockCacheStorage_Set_Call {
+func (_c *MockCacheStorage_Set_Call) RunAndReturn(run func(context.Context, string, []byte, time.Duration) error) *MockCacheStorage_Set_Call {
 	_c.Call.Return(run)
 	return _c
 }

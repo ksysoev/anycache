@@ -1,4 +1,4 @@
-package memcachestor
+package memcache
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 
 	"github.com/bradfitz/gomemcache/memcache"
 	"github.com/ksysoev/anycache"
+	"github.com/stretchr/testify/assert"
 )
 
 func getMemcachedHost() string {
@@ -28,7 +29,7 @@ func getMemcachedHost() string {
 
 func TestMemcacheCacheStorageGet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
@@ -42,9 +43,7 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
 
-	if value != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", value)
-	}
+	assert.Equal(t, []byte("testValue"), value, "Expected to get testValue, but got '%v'", value)
 
 	_, err = memcacheStore.Get(ctx, "TestMemcacheCacheStorageGetKey1")
 
@@ -55,11 +54,11 @@ func TestMemcacheCacheStorageGet(t *testing.T) {
 
 func TestMemcacheCacheStorageSet(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
-	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", "testValue", 0)
+	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey", []byte("testValue"), 0)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -70,7 +69,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 		t.Errorf("Expected to get testValue, but got '%v'", item.Value)
 	}
 
-	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", "testValue", 2*time.Second)
+	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageSetKey1", []byte("testValue"), 2*time.Second)
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -84,7 +83,7 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 
 func TestMemcacheCacheStorageTTL(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 
@@ -129,7 +128,7 @@ func TestMemcacheCacheStorageTTL(t *testing.T) {
 
 func TestMemcacheCacheStorageDel(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := NewMemcachedCacheStorage(memcachedClient)
+	memcacheStore := New(memcachedClient)
 
 	ctx := context.Background()
 

@@ -5,6 +5,7 @@ import (
 	"container/list"
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -56,14 +57,14 @@ func New(limit int) (*Storage, error) {
 }
 
 // Get retrieves the value associated with the provided key from the in-memory cache storage.
-func (s *Storage) Get(_ context.Context, key string) (string, error) {
+func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 	value, _, err := s.GetWithTTL(context.Background(), key)
 
 	return value, err
 }
 
 // Set stores a value associated with the provided key in the in-memory cache storage.
-func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) error {
+func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
 	if s.ctx.Err() != nil {
 		return errors.New("storage is closed")
 	}
@@ -93,7 +94,8 @@ func (s *Storage) Set(_ context.Context, key, value string, ttl time.Duration) e
 	}
 
 	item := &cacheItem{
-		value:  []byte(value),
+		key:    key,
+		value:  value,
 		expiry: expiry,
 	}
 
@@ -149,9 +151,9 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 }
 
 // GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the in-memory cache storage.
-func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Duration, error) {
+func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
 	if s.ctx.Err() != nil {
-		return "", 0, errors.New("storage is closed")
+		return nil, 0, errors.New("storage is closed")
 	}
 
 	s.mu.Lock()
@@ -160,24 +162,24 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) (string, time.Durati
 	item, ok := s.index[key]
 
 	if !ok {
-		return "", 0, anycache.ErrKeyNotExists
+		return nil, 0, anycache.ErrKeyNotExists
 	}
 
 	if item.expiry == nil {
 		s.items.MoveToBack(item.lruPos)
-		return string(item.value), 0, nil
+		return slices.Clone(item.value), 0, nil
 	}
 
 	ttl := time.Until(*item.expiry)
 	if ttl <= 0 {
 		s.delete(item)
 
-		return "", 0, anycache.ErrKeyNotExists
+		return nil, 0, anycache.ErrKeyNotExists
 	}
 
 	s.items.MoveToBack(item.lruPos)
 
-	return string(item.value), ttl, nil
+	return slices.Clone(item.value), ttl, nil
 }
 
 // Close gracefully shuts down the in-memory cache storage, ensuring that all resources are released and any ongoing operations are completed.

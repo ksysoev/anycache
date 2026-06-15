@@ -22,11 +22,11 @@ var ErrKeyNotExists = errors.New("key does not exist")
 
 // CacheStorage
 type CacheStorage interface {
-	Get(context.Context, string) (string, error)
-	Set(context.Context, string, string, time.Duration) error
+	Get(context.Context, string) ([]byte, error)
+	Set(context.Context, string, []byte, time.Duration) error
 	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
-	GetWithTTL(context.Context, string) (string, time.Duration, error)
+	GetWithTTL(context.Context, string) ([]byte, time.Duration, error)
 }
 
 // Cache
@@ -47,16 +47,17 @@ type CacheReuest struct {
 }
 
 type (
-	CacheGenerator func(ctx context.Context) (string, error)
-	CacheOptions   func(*Cache)
+	CacheGenerator  func(ctx context.Context) ([]byte, error)
+	CacheGeneratorS func(ctx context.Context) (string, error)
+	CacheOptions    func(*Cache)
 )
 
 type CacheItemOptions func(*CacheReuest)
 
-// NewCache creates a new Cache instance with the provided CacheStorage and CacheOptions.
+// New creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
 // It returns the created Cache instance.
-func NewCache(store CacheStorage, opts ...CacheOptions) *Cache {
+func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	c := Cache{
@@ -101,7 +102,7 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 // The function takes an optional list of CacheItemOptions to customize the caching behavior.
 // WithTTL sets TTL for cache item
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) (string, error) {
+func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator, opts ...CacheItemOptions) ([]byte, error) {
 	var req CacheReuest
 
 	for _, opt := range opts {
@@ -156,19 +157,38 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 
 	select {
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return nil, ctx.Err()
 	case resp := <-res:
 		if resp.Err != nil {
-			return "", resp.Err
+			return nil, resp.Err
 		}
 
-		val, ok := resp.Val.(string)
+		val, ok := resp.Val.([]byte)
 		if !ok {
-			return "", errors.New("unexpected value type returned from generator")
+			return nil, errors.New("unexpected value type returned from generator")
 		}
 
 		return val, nil
 	}
+}
+
+// CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
+func (c *Cache) CacheS(ctx context.Context, key string, generator CacheGeneratorS, opts ...CacheItemOptions) (string, error) {
+	generatorWrapper := func(ctx context.Context) ([]byte, error) {
+		result, err := generator(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		return []byte(result), nil
+	}
+
+	val, err := c.Cache(ctx, key, generatorWrapper, opts...)
+	if err != nil {
+		return "", err
+	}
+
+	return string(val), nil
 }
 
 // CacheStruct caches the result of a function that returns a struct.
@@ -180,18 +200,18 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
 func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
-	generatorWrapper := func(ctx context.Context) (string, error) {
+	generatorWrapper := func(ctx context.Context) ([]byte, error) {
 		val, err := generator(ctx)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		jsonVal, err := json.Marshal(val)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
-		return string(jsonVal), nil
+		return jsonVal, nil
 	}
 
 	val, err := c.Cache(ctx, key, generatorWrapper, opts...)
@@ -199,7 +219,7 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 		return err
 	}
 
-	err = json.Unmarshal([]byte(val), result)
+	err = json.Unmarshal(val, result)
 
 	return err
 }
@@ -219,7 +239,7 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) (string, error) {
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) ([]byte, error) {
 	value, err := generator(ctx)
 	if err != nil {
 		return value, err
