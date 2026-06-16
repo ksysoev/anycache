@@ -1,7 +1,7 @@
 package anycache
 
 const (
-	maxTTlShift = 100
+	maxTTLShift = 100
 )
 
 // WithTTLRandomization sets the maximum TTL shift percentage.
@@ -9,8 +9,8 @@ const (
 // maximum shift percentage is 100, which means that TTL can be shifted by up to 100% of the original TTL value.
 func WithTTLRandomization(shiftPercent uint8) func(*Cache) {
 	return func(c *Cache) {
-		if shiftPercent > maxTTlShift {
-			c.maxShiftTTL = maxTTlShift
+		if shiftPercent > maxTTLShift {
+			c.maxShiftTTL = maxTTLShift
 
 			return
 		}
