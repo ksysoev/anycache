@@ -19,13 +19,7 @@ func TestWithTTLRandomization(t *testing.T) {
 
 	mockStorage.EXPECT().Get(mock.Anything, "TestKey").Return(nil, ErrKeyNotExists)
 	mockStorage.EXPECT().Set(mock.Anything, "TestKey", []byte("testValue"), mock.MatchedBy(func(ttl time.Duration) bool {
-		if ttl < 90*time.Second || ttl > 110*time.Second {
-			t.Errorf("Expected TTL to be between 90s and 110s, but got %v", ttl)
-			// don't return false here to allow test to continue, otherwise test will stuck
-			return true
-		}
-
-		return true
+		return ttl >= 90*time.Second && ttl <= 110*time.Second
 	})).Return(nil)
 
 	_, err := cache.Cache(t.Context(), "TestKey", func(_ context.Context) ([]byte, error) {
