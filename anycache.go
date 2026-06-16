@@ -37,9 +37,9 @@ type Cache struct {
 	warmUpSF    singleflight.Group
 	cancelCtx   context.CancelFunc
 	cancel      chan *CacheReuest
+	keyPrefix   string
 	wg          sync.WaitGroup
 	maxShiftTTL uint8
-	keyPrefix   string
 }
 
 type CacheReuest struct {
