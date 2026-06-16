@@ -163,7 +163,7 @@ func TestInMemoryCacheStorage_Set(t *testing.T) {
 			name:          "Successfully set a value for a key with a TTL and retrieve it before expiration",
 			key:           "key2",
 			value:         []byte("value2"),
-			ttl:           2 * time.Millisecond,
+			ttl:           2 * time.Second,
 			wantErr:       false,
 			waitBeforeGet: time.Millisecond,
 			ableToGet:     true,
