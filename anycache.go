@@ -39,6 +39,7 @@ type Cache struct {
 	cancel      chan *CacheReuest
 	wg          sync.WaitGroup
 	maxShiftTTL uint8
+	keyPrefix   string
 }
 
 type CacheReuest struct {
@@ -74,13 +75,6 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	return &c
 }
 
-// WithTTLRandomization sets max shift of TTL in persent
-func WithTTLRandomization(maxShiftPercent uint8) func(*Cache) {
-	return func(c *Cache) {
-		c.maxShiftTTL = maxShiftPercent
-	}
-}
-
 // WithTTL sets TTL for cache item
 func WithTTL(ttl time.Duration) CacheItemOptions {
 	return func(req *CacheReuest) {
@@ -108,6 +102,8 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 	for _, opt := range opts {
 		opt(&req)
 	}
+
+	key = c.keyPrefix + key
 
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
@@ -228,6 +224,8 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 // accepts a context and the key to be invalidated.
 // returns an error if there was a problem invalidating the cache for the key.
 func (c *Cache) Invalidate(ctx context.Context, key string) error {
+	key = c.keyPrefix + key
+
 	_, err := c.Storage.Del(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate cache for key %s: %w", key, err)
