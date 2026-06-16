@@ -35,6 +35,23 @@ func TestWithTTLRandomization(t *testing.T) {
 	assert.NoError(t, err, "Expected to get no error, but got %v", err)
 }
 
+func TestWithWarmUpTTL_MaxTTLShift(t *testing.T) {
+	option := WithTTLRandomization(20)
+	storage := NewMockCacheStorage(t)
+	cache := New(storage, option)
+
+	assert.Equal(t, uint8(20), cache.maxShiftTTL, "Expected TTL randomization factor to be 20 percent, but got %v", cache.maxShiftTTL)
+
+	option = WithTTLRandomization(100)
+	cache = New(storage, option)
+
+	assert.Equal(t, uint8(100), cache.maxShiftTTL, "Expected TTL randomization factor to be 100 percent, but got %v", cache.maxShiftTTL)
+
+	option = WithTTLRandomization(150)
+	cache = New(storage, option)
+	assert.Equal(t, uint8(100), cache.maxShiftTTL, "Expected TTL randomization factor to be capped at 100 percent, but got %v", cache.maxShiftTTL)
+}
+
 func TestWithKeyPrefix(t *testing.T) {
 	option := WithKeyPrefix("testPrefix::")
 

@@ -1,11 +1,21 @@
 package anycache
 
+const (
+	maxTTlShift = 100
+)
+
 // WithTTLRandomization sets the maximum TTL shift percentage.
 // TTL randomization helps prevent cache stampedes by spreading entry expirations over time.
-// Note: the current implementation shifts TTL within roughly ±(maxShiftPercent/2)% of the original TTL.
-func WithTTLRandomization(maxShiftPercent uint8) func(*Cache) {
+// maximum shift percentage is 100, which means that TTL can be shifted by up to 100% of the original TTL value.
+func WithTTLRandomization(shiftPercent uint8) func(*Cache) {
 	return func(c *Cache) {
-		c.maxShiftTTL = maxShiftPercent
+		if shiftPercent > maxTTlShift {
+			c.maxShiftTTL = maxTTlShift
+
+			return
+		}
+
+		c.maxShiftTTL = shiftPercent
 	}
 }
 
