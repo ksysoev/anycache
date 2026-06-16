@@ -59,11 +59,8 @@ func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Du
 	return nil
 }
 
-// Del deletes the value associated with the provided key from the Redis cache storage.
-// It returns a boolean indicating whether the deletion was successful, and an error if any occurred.
-// If the key does not exist, it returns false and nil error.
-// If any other error occurs during the operation, it returns false and the error.
-func (s *Storage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
+// ttl retrieves the time-to-live (TTL) for the provided key from the Redis cache storage.
+func (s *Storage) ttl(ctx context.Context, key string) (bool, time.Duration, error) {
 	var ttl time.Duration
 
 	hasTTL := false
@@ -114,7 +111,7 @@ func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Dura
 		return value, 0, err
 	}
 
-	hasTTL, ttl, err := s.TTL(ctx, key)
+	hasTTL, ttl, err := s.ttl(ctx, key)
 	if err != nil {
 		return value, 0, err
 	}

@@ -92,7 +92,7 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey", "testValue", 1*time.Second)
 
-	hasTTL, ttl, err := redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey")
+	hasTTL, ttl, err := redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey")
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}
@@ -105,7 +105,7 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 		t.Errorf("Expected to get TTL as 1000 millisecond, but it has value %v microseconds", ttl.Milliseconds())
 	}
 
-	_, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey1")
+	_, _, err = redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey1")
 
 	if !errors.Is(err, anycache.ErrKeyNotExists) {
 		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
@@ -113,7 +113,7 @@ func TestRedisCacheStorageTTL(t *testing.T) {
 
 	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)
 
-	hasTTL, _, err = redisStore.TTL(ctx, "TestRedisCacheStorageTTLKey2")
+	hasTTL, _, err = redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey2")
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}

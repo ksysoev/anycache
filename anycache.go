@@ -24,7 +24,6 @@ var ErrKeyNotExists = errors.New("key does not exist")
 type CacheStorage interface {
 	Get(context.Context, string) ([]byte, error)
 	Set(context.Context, string, []byte, time.Duration) error
-	TTL(context.Context, string) (bool, time.Duration, error)
 	Del(context.Context, string) (bool, error)
 	GetWithTTL(context.Context, string) ([]byte, time.Duration, error)
 }
