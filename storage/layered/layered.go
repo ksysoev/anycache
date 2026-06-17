@@ -1,10 +1,10 @@
 package layered
 
-// Layered cache storage allows to use multiple cache storages in a layered manner,
-// This can be useful in scenarios where you want to have a fast in-memory cache as the first layer
-// and a slower but more persistent cache (like Redis or Memcached) as the second layer.
-// Even though layerd cache support any number of provided stores, it recommended to use not more that to layers,
-// 1st layer for in-memory cache and 2nd layer for distributed cache, because of performance reasons,
+// Layered cache storage allows using multiple cache storages in a layered manner.
+// This is useful when you want a fast in-memory cache as the first layer and a slower but more persistent cache
+// (like Redis or Memcached) as the second layer.
+// Although layered cache supports any number of stores, it's recommended to use no more than two layers
+// (1st: in-memory, 2nd: distributed) for performance reasons.
 
 import (
 	"context"
