@@ -97,6 +97,7 @@ func (s *Storage) Del(ctx context.Context, key string) (bool, error) {
 		if err != nil {
 			return deletedAny, fmt.Errorf("error deleting key from store %d: %w", i, err)
 		}
+
 		deletedAny = deletedAny || deleted
 	}
 
