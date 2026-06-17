@@ -31,6 +31,12 @@ func New(stores ...anycache.CacheStorage) (*Storage, error) {
 		return nil, fmt.Errorf("at least 2 storages are required, got %d", len(stores))
 	}
 
+	for i, store := range stores {
+		if store == nil {
+			return nil, fmt.Errorf("storage %d is nil", i)
+		}
+	}
+
 	return &Storage{stores: stores}, nil
 }
 
