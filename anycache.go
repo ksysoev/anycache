@@ -113,13 +113,13 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 		}()
 
 		var (
-			needWarmUp    bool
-			warmUpLock    bool
-			warmUpStarted bool
+			needWarmUp         bool
+			acquiredWarmUpLock bool
+			warmUpStarted      bool
 		)
 
 		defer func() {
-			if warmUpLock && !warmUpStarted {
+			if acquiredWarmUpLock && !warmUpStarted {
 				c.warmUpLocks.Delete(key)
 			}
 		}()
@@ -128,7 +128,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			var ttl time.Duration
 
 			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
-			warmUpLock = !warmUpLockBusy
+			acquiredWarmUpLock = !warmUpLockBusy
 
 			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
@@ -147,7 +147,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			return "", err
 		}
 
-		if needWarmUp && warmUpLock {
+		if needWarmUp && acquiredWarmUpLock {
 			c.wg.Go(func() {
 				defer c.warmUpLocks.Delete(key)
 
