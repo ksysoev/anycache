@@ -11,3 +11,7 @@ packages:
   github.com/ksysoev/anycache:
     interfaces:
       CacheStorage:
+  github.com/ksysoev/anycache/storage/memcache:
+    interfaces:
+      MemCached:
+  

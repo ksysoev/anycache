@@ -17,11 +17,17 @@ const (
 )
 
 type Storage struct {
-	memcache *memcache.Client
+	memcache MemCached
+}
+
+type MemCached interface {
+	Get(key string) (*memcache.Item, error)
+	Set(item *memcache.Item) error
+	Delete(key string) error
 }
 
 // New creates a new memcache cache storage with the provided memcache client.
-func New(client *memcache.Client) *Storage {
+func New(client MemCached) *Storage {
 	return &Storage{client}
 }
 
