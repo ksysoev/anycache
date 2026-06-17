@@ -81,51 +81,6 @@ func TestMemcacheCacheStorageSet(t *testing.T) {
 	}
 }
 
-func TestMemcacheCacheStorageTTL(t *testing.T) {
-	memcachedClient := memcache.New(getMemcachedHost())
-	memcacheStore := New(memcachedClient)
-
-	ctx := context.Background()
-
-	err := memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey", []byte("testValue"), 10*time.Second)
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	hasTTL, ttl, err := memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey")
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	if !hasTTL {
-		t.Errorf("Expected to have TTL, but it does not have")
-	}
-
-	if ttl <= 0 {
-		t.Errorf("Expected TTL to be > 0, but got %v", ttl)
-	}
-
-	_, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey1")
-
-	if !errors.Is(err, anycache.ErrKeyNotExists) {
-		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
-	}
-
-	err = memcacheStore.Set(ctx, "TestMemcacheCacheStorageTTLKey2", []byte("testValue"), 0)
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	hasTTL, _, err = memcacheStore.TTL(ctx, "TestMemcacheCacheStorageTTLKey2")
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	if hasTTL {
-		t.Errorf("Expected to have no TTL, but it has")
-	}
-}
-
 func TestMemcacheCacheStorageDel(t *testing.T) {
 	memcachedClient := memcache.New(getMemcachedHost())
 	memcacheStore := New(memcachedClient)

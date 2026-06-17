@@ -68,21 +68,6 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	})
 }
 
-// TTL returns the remaining TTL for key.
-//
-//   - (false, 0, ErrKeyNotExists) – key not found or already past its expiry.
-//   - (false, 0, nil)             – key exists but has no expiration.
-//   - (true,  d, nil)             – key exists and expires in d.
-func (s *Storage) TTL(ctx context.Context, key string) (bool, time.Duration, error) {
-	_, ttl, err := s.GetWithTTL(ctx, key)
-
-	if ttl > 0 {
-		return true, ttl, err
-	}
-
-	return false, ttl, err
-}
-
 // GetWithTTL retrieves both the value and its remaining TTL in one call.
 func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
 	raw, err := s.memcache.Get(key)

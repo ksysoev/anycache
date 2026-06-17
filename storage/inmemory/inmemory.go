@@ -112,20 +112,6 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	return nil
 }
 
-// TTL retrieves the time-to-live (TTL) associated with the provided key from the in-memory cache storage.
-func (s *Storage) TTL(_ context.Context, key string) (bool, time.Duration, error) {
-	_, ttl, err := s.GetWithTTL(context.Background(), key)
-	if err != nil {
-		return false, 0, err
-	}
-
-	if ttl == 0 {
-		return false, 0, err
-	}
-
-	return true, ttl, nil
-}
-
 // Del deletes the value associated with the provided key from the in-memory cache storage.
 func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 	if s.ctx.Err() != nil {
