@@ -33,9 +33,9 @@ type Cache struct {
 	Storage     CacheStorage
 	ctx         context.Context
 	sf          singleflight.Group
-	warmUpSF    singleflight.Group
 	cancelCtx   context.CancelFunc
 	cancel      chan *CacheReuest
+	warmUpLocks sync.Map
 	keyPrefix   string
 	wg          sync.WaitGroup
 	maxShiftTTL uint8
@@ -112,10 +112,23 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			}
 		}()
 
-		var needWarmUp bool
+		var (
+			needWarmUp         bool
+			acquiredWarmUpLock bool
+			warmUpStarted      bool
+		)
+
+		defer func() {
+			if acquiredWarmUpLock && !warmUpStarted {
+				c.warmUpLocks.Delete(key)
+			}
+		}()
 
 		if req.WarmUpTTL > 0 {
 			var ttl time.Duration
+
+			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
+			acquiredWarmUpLock = !warmUpLockBusy
 
 			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
@@ -134,17 +147,17 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			return "", err
 		}
 
-		if needWarmUp {
+		if needWarmUp && acquiredWarmUpLock {
 			c.wg.Go(func() {
-				_, _, _ = c.warmUpSF.Do(key, func() (any, error) {
-					_, err := c.generateAndSet(ctx, key, req.TTL, generator)
-					if err != nil {
-						slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
-					}
+				defer c.warmUpLocks.Delete(key)
 
-					return nil, nil
-				})
+				_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+				if err != nil {
+					slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
+				}
 			})
+
+			warmUpStarted = true
 		}
 
 		return value, err
