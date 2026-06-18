@@ -87,8 +87,7 @@ func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Dura
 	return nil, 0, anycache.ErrKeyNotExists
 }
 
-// Del deletes the value associated with the provided key from all layers.
-// It returns true if the key was deleted from at least one layer.
+// Del deletes the value associated with the provided key from all layers of the cache storage.
 func (s *Storage) Del(ctx context.Context, key string) error {
 	for i, store := range s.stores {
 		err := store.Del(ctx, key)

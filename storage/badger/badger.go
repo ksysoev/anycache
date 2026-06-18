@@ -19,6 +19,7 @@ func New(client *badger.DB) *Storage {
 	}
 }
 
+// Get retrieves the value associated with the provided key from the Badger cache storage.
 func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 	var val []byte
 
@@ -46,6 +47,7 @@ func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 	return val, nil
 }
 
+// Set stores a value associated with the provided key in the Badger cache storage with an optional TTL.
 func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
 	return s.client.Update(func(txn *badger.Txn) error {
 		entity := badger.NewEntry([]byte(key), value)
@@ -57,12 +59,14 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	})
 }
 
+// Delete removes the value associated with the provided key from the Badger cache storage.
 func (s *Storage) Delete(_ context.Context, key string) error {
 	return s.client.Update(func(txn *badger.Txn) error {
 		return txn.Delete([]byte(key))
 	})
 }
 
+// GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the Badger cache storage.
 func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
 	var (
 		val []byte
