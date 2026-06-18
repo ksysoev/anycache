@@ -3,142 +3,251 @@ package redis
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/ksysoev/anycache"
-	"github.com/redis/go-redis/v9"
+	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 )
 
-func getRedisOptions() *redis.Options {
-	TestRedisHost := os.Getenv("TEST_REDIS_HOST")
-	if TestRedisHost == "" {
-		TestRedisHost = "localhost"
+func newStringResult(val string, err error) *goredis.StringCmd {
+	cmd := goredis.NewStringCmd(context.Background())
+	if err != nil {
+		cmd.SetErr(err)
+	} else {
+		cmd.SetVal(val)
 	}
 
-	TestRedisPort := os.Getenv("TEST_REDIS_PORT")
-	if TestRedisPort == "" {
-		TestRedisPort = "6379"
-	}
-
-	return &redis.Options{Addr: fmt.Sprintf("%s:%s", TestRedisHost, TestRedisPort)}
+	return cmd
 }
 
-func TestRedisCacheStorageGet(t *testing.T) {
-	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := New(redisClient)
-
-	ctx := context.Background()
-
-	redisClient.Set(ctx, "TestRedisCacheStorageGetKey", "testValue", 0*time.Second)
-
-	value, err := redisStore.Get(ctx, "TestRedisCacheStorageGetKey")
+func newStatusResult(err error) *goredis.StatusCmd {
+	cmd := goredis.NewStatusCmd(context.Background())
 	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
+		cmd.SetErr(err)
+	} else {
+		cmd.SetVal("OK")
 	}
 
-	assert.Equal(t, []byte("testValue"), value, "Expected to get testValue, but got '%v'", value)
-
-	_, err = redisStore.Get(ctx, "TestRedisCacheStorageGetKey1")
-
-	if !errors.Is(err, anycache.ErrKeyNotExists) {
-		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
-	}
+	return cmd
 }
 
-func TestRedisCacheStorageSet(t *testing.T) {
-	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := New(redisClient)
-
-	ctx := context.Background()
-
-	err := redisStore.Set(ctx, "TestRedisCacheStorageSetKey", []byte("testValue"), 0)
+func newIntResult(val int64, err error) *goredis.IntCmd {
+	cmd := goredis.NewIntCmd(context.Background())
 	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
+		cmd.SetErr(err)
+	} else {
+		cmd.SetVal(val)
 	}
 
-	val, _ := redisClient.Get(ctx, "TestRedisCacheStorageSetKey").Result()
-
-	if val != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val)
-	}
-
-	err = redisStore.Set(ctx, "TestRedisCacheStorageSetKey1", []byte("testValue"), 2*time.Second)
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	val1, _ := redisClient.Get(ctx, "TestRedisCacheStorageSetKey1").Result()
-
-	if val1 != "testValue" {
-		t.Errorf("Expected to get testValue, but got '%v'", val1)
-	}
-
-	ttl, _ := redisClient.TTL(ctx, "TestRedisCacheStorageSetKey1").Result()
-
-	if ttl.Milliseconds() <= 0 || ttl.Milliseconds() > 2000 {
-		t.Errorf("Expected to get valid TTL, but it has value %v", ttl.Milliseconds())
-	}
+	return cmd
 }
 
-func TestRedisCacheStorageTTL(t *testing.T) {
-	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := New(redisClient)
-
-	ctx := context.Background()
-
-	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey", "testValue", 1*time.Second)
-
-	hasTTL, ttl, err := redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey")
+func newDurationResult(val time.Duration, err error) *goredis.DurationCmd {
+	cmd := goredis.NewDurationCmd(context.Background(), time.Millisecond)
 	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
+		cmd.SetErr(err)
+	} else {
+		cmd.SetVal(val)
 	}
 
-	if !hasTTL {
-		t.Errorf("Expected to have TTL, but it doesnt")
-	}
-
-	if ttl.Milliseconds() < 0 || ttl.Milliseconds() > 1000 {
-		t.Errorf("Expected to get TTL as 1000 millisecond, but it has value %v microseconds", ttl.Milliseconds())
-	}
-
-	_, _, err = redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey1")
-
-	if !errors.Is(err, anycache.ErrKeyNotExists) {
-		t.Errorf("Expected to get error %v, but got '%v'", anycache.ErrKeyNotExists, err)
-	}
-
-	redisClient.Set(ctx, "TestRedisCacheStorageTTLKey2", "testValue", 0*time.Second)
-
-	hasTTL, _, err = redisStore.ttl(ctx, "TestRedisCacheStorageTTLKey2")
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	if hasTTL {
-		t.Errorf("Expected to have no TTL, but it has")
-	}
+	return cmd
 }
 
-func TestRedisCacheStorageDel(t *testing.T) {
-	redisClient := redis.NewClient(getRedisOptions())
-	redisStore := New(redisClient)
+func TestGet_HitReturnsValue(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
 
-	ctx := context.Background()
+	mc.EXPECT().Get(mock.Anything, "mykey").Return(newStringResult("hello", nil))
 
-	redisClient.Set(ctx, "TestRedisCacheStorageDelKey", "testValue", 0*time.Second)
+	val, err := s.Get(context.Background(), "mykey")
 
-	_, err := redisStore.Del(ctx, "TestRedisCacheStorageDelKey")
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, []byte("hello"), val)
+}
 
-	_, err = redisClient.Get(ctx, "TestRedisCacheStorageDelKey").Result()
+func TestGet_MissReturnsErrKeyNotExists(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
 
-	if !errors.Is(err, redis.Nil) {
-		t.Errorf("Expected to get error %v, but got '%v'", redis.Nil, err)
-	}
+	mc.EXPECT().Get(mock.Anything, "missing").Return(newStringResult("", goredis.Nil))
+
+	_, err := s.Get(context.Background(), "missing")
+
+	assert.ErrorIs(t, err, anycache.ErrKeyNotExists)
+}
+
+func TestGet_PropagatesUnexpectedError(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	connErr := errors.New("connection refused")
+	mc.EXPECT().Get(mock.Anything, "key").Return(newStringResult("", connErr))
+
+	_, err := s.Get(context.Background(), "key")
+
+	assert.ErrorIs(t, err, connErr)
+}
+
+func TestSet_NoTTL(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Duration(0)).Return(newStatusResult(nil))
+
+	err := s.Set(context.Background(), "key", []byte("value"), 0)
+
+	require.NoError(t, err)
+}
+
+func TestSet_WithTTL(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Set(mock.Anything, "key", []byte("value"), 5*time.Second).Return(newStatusResult(nil))
+
+	err := s.Set(context.Background(), "key", []byte("value"), 5*time.Second)
+
+	require.NoError(t, err)
+}
+
+func TestSet_PropagatesError(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	serverErr := errors.New("server error")
+	mc.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Duration(0)).Return(newStatusResult(serverErr))
+
+	err := s.Set(context.Background(), "key", []byte("value"), 0)
+
+	assert.ErrorIs(t, err, serverErr)
+}
+
+func TestTTL_KeyHasTTL(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().PTTL(mock.Anything, "key").Return(newDurationResult(5*time.Second, nil))
+
+	hasTTL, ttl, err := s.ttl(context.Background(), "key")
+
+	require.NoError(t, err)
+	assert.True(t, hasTTL)
+	assert.Equal(t, 5*time.Second, ttl)
+}
+
+func TestTTL_KeyHasNoExpiry(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	// -1 is the sentinel for "key exists, no expiry"
+	mc.EXPECT().PTTL(mock.Anything, "key").Return(newDurationResult(time.Duration(-1), nil))
+
+	hasTTL, _, err := s.ttl(context.Background(), "key")
+
+	require.NoError(t, err)
+	assert.False(t, hasTTL)
+}
+
+func TestTTL_KeyNotExists(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	// -2 is the sentinel for "key does not exist"
+	mc.EXPECT().PTTL(mock.Anything, "missing").Return(newDurationResult(time.Duration(-2), nil))
+
+	_, _, err := s.ttl(context.Background(), "missing")
+
+	assert.ErrorIs(t, err, anycache.ErrKeyNotExists)
+}
+
+func TestTTL_PropagatesError(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	redisErr := errors.New("redis error")
+	mc.EXPECT().PTTL(mock.Anything, "key").Return(newDurationResult(0, redisErr))
+
+	_, _, err := s.ttl(context.Background(), "key")
+
+	assert.ErrorIs(t, err, redisErr)
+}
+
+func TestDel_ExistingKey(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Del(mock.Anything, "key").Return(newIntResult(1, nil))
+
+	deleted, err := s.Del(context.Background(), "key")
+
+	require.NoError(t, err)
+	assert.True(t, deleted)
+}
+
+func TestDel_MissingKey(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Del(mock.Anything, "missing").Return(newIntResult(0, nil))
+
+	deleted, err := s.Del(context.Background(), "missing")
+
+	require.NoError(t, err)
+	assert.False(t, deleted)
+}
+
+func TestDel_PropagatesError(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	netErr := errors.New("network error")
+	mc.EXPECT().Del(mock.Anything, "key").Return(newIntResult(0, netErr))
+
+	deleted, err := s.Del(context.Background(), "key")
+
+	assert.ErrorIs(t, err, netErr)
+	assert.False(t, deleted)
+}
+
+func TestGetWithTTL_HitNoExpiry(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Get(mock.Anything, "key").Return(newStringResult("value", nil))
+	mc.EXPECT().PTTL(mock.Anything, "key").Return(newDurationResult(time.Duration(-1), nil))
+
+	val, ttl, err := s.GetWithTTL(context.Background(), "key")
+
+	require.NoError(t, err)
+	assert.Equal(t, []byte("value"), val)
+	assert.Zero(t, ttl)
+}
+
+func TestGetWithTTL_HitWithExpiry(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Get(mock.Anything, "key").Return(newStringResult("value", nil))
+	mc.EXPECT().PTTL(mock.Anything, "key").Return(newDurationResult(3*time.Second, nil))
+
+	val, ttl, err := s.GetWithTTL(context.Background(), "key")
+
+	require.NoError(t, err)
+	assert.Equal(t, []byte("value"), val)
+	assert.Equal(t, 3*time.Second, ttl)
+}
+
+func TestGetWithTTL_MissReturnsErrKeyNotExists(t *testing.T) {
+	mc := NewMockClient(t)
+	s := New(mc)
+
+	mc.EXPECT().Get(mock.Anything, "missing").Return(newStringResult("", goredis.Nil))
+
+	_, _, err := s.GetWithTTL(context.Background(), "missing")
+
+	assert.ErrorIs(t, err, anycache.ErrKeyNotExists)
 }
