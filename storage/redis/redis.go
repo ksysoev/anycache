@@ -10,11 +10,18 @@ import (
 )
 
 type Storage struct {
-	redisDB *redis.Client
+	redisDB Client
+}
+
+type Client interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+	PTTL(ctx context.Context, key string) *redis.DurationCmd
 }
 
 // New creates a new RedisCacheStorage
-func New(redisDB *redis.Client) *Storage {
+func New(redisDB Client) *Storage {
 	return &Storage{redisDB: redisDB}
 }
 
