@@ -14,4 +14,6 @@ packages:
   github.com/ksysoev/anycache/storage/memcache:
     interfaces:
       MemCached:
-  
+  github.com/ksysoev/anycache/storage/redis:
+    interfaces:
+      Client:
