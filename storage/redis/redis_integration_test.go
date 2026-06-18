@@ -138,10 +138,9 @@ func TestIntegration_Del_ExistingKey(t *testing.T) {
 
 	require.NoError(t, client.Set(t.Context(), "integ:del:existing", "to-be-deleted", 0).Err())
 
-	deleted, err := s.Del(t.Context(), "integ:del:existing")
+	err := s.Del(t.Context(), "integ:del:existing")
 
 	require.NoError(t, err)
-	assert.True(t, deleted, "expected deleted=true for existing key")
 
 	_, getErr := s.Get(t.Context(), "integ:del:existing")
 
@@ -153,10 +152,9 @@ func TestIntegration_Del_MissingKey(t *testing.T) {
 
 	s := New(goredis.NewClient(getRedisOptions()))
 
-	deleted, err := s.Del(t.Context(), "integ:del:missing:nonexistent")
+	err := s.Del(t.Context(), "integ:del:missing:nonexistent")
 
 	require.NoError(t, err)
-	assert.False(t, deleted, "expected deleted=false for non-existent key")
 }
 
 func TestIntegration_TTL_KeyHasTTL(t *testing.T) {
@@ -228,10 +226,9 @@ func TestIntegration_DeleteThenGet(t *testing.T) {
 
 	require.NoError(t, s.Set(t.Context(), "integ:edge:delthenget", []byte("exists"), 0))
 
-	deleted, err := s.Del(t.Context(), "integ:edge:delthenget")
+	err := s.Del(t.Context(), "integ:edge:delthenget")
 
 	require.NoError(t, err)
-	require.True(t, deleted)
 
 	_, getErr := s.Get(t.Context(), "integ:edge:delthenget")
 
@@ -244,7 +241,7 @@ func TestIntegration_GetWithTTL_AfterDel(t *testing.T) {
 
 	require.NoError(t, s.Set(t.Context(), "integ:edge:getttl:del", []byte("v"), 10*time.Second))
 
-	_, err := s.Del(t.Context(), "integ:edge:getttl:del")
+	err := s.Del(t.Context(), "integ:edge:getttl:del")
 
 	require.NoError(t, err)
 

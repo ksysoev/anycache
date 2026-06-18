@@ -92,15 +92,10 @@ func (s *Storage) ttl(ctx context.Context, key string) (bool, time.Duration, err
 // It returns a boolean indicating whether the deletion was successful, and an error if any occurred.
 // If the key does not exist, it returns false and nil error.
 // If any other error occurs during the operation, it returns false and the error.
-func (s *Storage) Del(ctx context.Context, key string) (bool, error) {
-	deleted, err := s.redisDB.Del(ctx, key).Result()
-	if err != nil {
-		return false, err
-	}
+func (s *Storage) Del(ctx context.Context, key string) error {
+	_, err := s.redisDB.Del(ctx, key).Result()
 
-	isDeleted := deleted > 0
-
-	return isDeleted, nil
+	return err
 }
 
 // GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the Redis cache storage.

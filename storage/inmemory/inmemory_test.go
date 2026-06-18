@@ -229,7 +229,6 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 		setup   func(*testing.T) *Storage
 		name    string
 		key     string
-		want    bool
 		wantErr bool
 	}{
 		{
@@ -249,7 +248,6 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 
 				return s
 			},
-			want:    true,
 			wantErr: false,
 		},
 		{
@@ -269,7 +267,6 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 
 				return s
 			},
-			want:    false,
 			wantErr: false,
 		},
 		{
@@ -291,7 +288,6 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 
 				return s
 			},
-			want:    false,
 			wantErr: false,
 		},
 	}
@@ -301,7 +297,7 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 
 			defer func() { _ = s.Close() }()
 
-			got, gotErr := s.Del(context.Background(), tt.key)
+			gotErr := s.Del(t.Context(), tt.key)
 			if gotErr != nil {
 				if !tt.wantErr {
 					t.Errorf("Del() failed: %v", gotErr)
@@ -312,10 +308,6 @@ func TestInMemoryCacheStorage_Del(t *testing.T) {
 
 			if tt.wantErr {
 				t.Fatal("Del() succeeded unexpectedly")
-			}
-
-			if tt.want != got {
-				t.Errorf("Del() = %v, want %v", got, tt.want)
 			}
 		})
 	}

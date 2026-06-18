@@ -108,17 +108,13 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 }
 
 // Del deletes key. Returns (false, nil) if the key did not exist.
-func (s *Storage) Del(_ context.Context, key string) (bool, error) {
+func (s *Storage) Del(_ context.Context, key string) error {
 	err := s.memcache.Delete(key)
 	if errors.Is(err, memcache.ErrCacheMiss) {
-		return false, nil
+		return nil
 	}
 
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
+	return err
 }
 
 // encode serialises value + optional expiry into a protobuf CachedItem.

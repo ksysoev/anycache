@@ -57,15 +57,10 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	})
 }
 
-func (s *Storage) Delete(_ context.Context, key string) (bool, error) {
-	err := s.client.Update(func(txn *badger.Txn) error {
+func (s *Storage) Delete(_ context.Context, key string) error {
+	return s.client.Update(func(txn *badger.Txn) error {
 		return txn.Delete([]byte(key))
 	})
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
 }
 
 func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {

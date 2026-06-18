@@ -113,9 +113,9 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 }
 
 // Del deletes the value associated with the provided key from the in-memory cache storage.
-func (s *Storage) Del(_ context.Context, key string) (bool, error) {
+func (s *Storage) Del(_ context.Context, key string) error {
 	if s.ctx.Err() != nil {
-		return false, errors.New("storage is closed")
+		return errors.New("storage is closed")
 	}
 
 	s.mu.Lock()
@@ -123,17 +123,17 @@ func (s *Storage) Del(_ context.Context, key string) (bool, error) {
 
 	item, ok := s.index[key]
 	if !ok {
-		return false, nil
+		return nil
 	}
 
 	if item.expiry != nil && time.Until(*item.expiry) <= 0 {
 		s.delete(item)
-		return false, nil
+		return nil
 	}
 
 	s.delete(item)
 
-	return true, nil
+	return nil
 }
 
 // GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the in-memory cache storage.

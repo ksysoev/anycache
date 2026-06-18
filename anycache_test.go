@@ -175,7 +175,7 @@ func TestCache_Invalidate(t *testing.T) {
 			wantErr: false,
 			setup: func() CacheStorage {
 				store := NewMockCacheStorage(t)
-				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(true, nil)
+				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(nil)
 
 				return store
 			},
@@ -186,18 +186,7 @@ func TestCache_Invalidate(t *testing.T) {
 			wantErr: true,
 			setup: func() CacheStorage {
 				store := NewMockCacheStorage(t)
-				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(false, assert.AnError)
-
-				return store
-			},
-		},
-		{
-			name:    "Invalidate missing key",
-			key:     "TestInvalidateNotExistingKey",
-			wantErr: false,
-			setup: func() CacheStorage {
-				store := NewMockCacheStorage(t)
-				store.EXPECT().Del(mock.Anything, "TestInvalidateNotExistingKey").Return(false, nil)
+				store.EXPECT().Del(mock.Anything, "TestInvalidateKey").Return(assert.AnError)
 
 				return store
 			},
