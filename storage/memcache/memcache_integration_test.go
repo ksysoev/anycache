@@ -287,8 +287,5 @@ func TestIntegration_Set_TTLTooSmall_Rejected(t *testing.T) {
 
 	// Confirm nothing was written.
 	_, getErr := s.Get(ctx, "integ:edge:smallttl")
-
-	if !errors.Is(getErr, anycache.ErrKeyNotExists) {
-		t.Logf("note: key unexpectedly present (err=%v)", getErr)
-	}
+	require.ErrorIs(t, getErr, anycache.ErrKeyNotExists)
 }
