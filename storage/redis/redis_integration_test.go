@@ -33,6 +33,7 @@ func skipIfNoRedis(t *testing.T) *goredis.Client {
 	t.Helper()
 
 	client := goredis.NewClient(getRedisOptions())
+
 	t.Cleanup(func() { _ = client.Close() })
 
 	if err := client.Ping(context.Background()).Err(); err != nil {

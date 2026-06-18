@@ -13,6 +13,8 @@ import (
 )
 
 func newStringResult(t *testing.T, val string, err error) *goredis.StringCmd {
+	t.Helper()
+
 	cmd := goredis.NewStringCmd(t.Context())
 	if err != nil {
 		cmd.SetErr(err)
@@ -24,6 +26,8 @@ func newStringResult(t *testing.T, val string, err error) *goredis.StringCmd {
 }
 
 func newStatusResult(t *testing.T, err error) *goredis.StatusCmd {
+	t.Helper()
+
 	cmd := goredis.NewStatusCmd(t.Context())
 	if err != nil {
 		cmd.SetErr(err)
@@ -35,6 +39,8 @@ func newStatusResult(t *testing.T, err error) *goredis.StatusCmd {
 }
 
 func newIntResult(t *testing.T, val int64, err error) *goredis.IntCmd {
+	t.Helper()
+
 	cmd := goredis.NewIntCmd(t.Context())
 	if err != nil {
 		cmd.SetErr(err)
@@ -46,6 +52,8 @@ func newIntResult(t *testing.T, val int64, err error) *goredis.IntCmd {
 }
 
 func newDurationResult(t *testing.T, val time.Duration, err error) *goredis.DurationCmd {
+	t.Helper()
+
 	cmd := goredis.NewDurationCmd(t.Context(), time.Millisecond)
 	if err != nil {
 		cmd.SetErr(err)
