@@ -237,7 +237,9 @@ func TestIntegration_EmptyValue(t *testing.T) {
 	val, err := s.Get(ctx, "integ:edge:empty")
 
 	require.NoError(t, err)
-	assert.Equal(t, nil, val)
+
+	var expected []byte // nil slice is semantically equivalent to empty slice for our purposes
+	assert.Equal(t, expected, val)
 }
 
 func TestIntegration_DeleteThenGet(t *testing.T) {
