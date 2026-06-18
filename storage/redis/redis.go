@@ -10,11 +10,18 @@ import (
 )
 
 type Storage struct {
-	redisDB *redis.Client
+	redisDB Client
+}
+
+type Client interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.StatusCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
+	PTTL(ctx context.Context, key string) *redis.DurationCmd
 }
 
 // New creates a new RedisCacheStorage
-func New(redisDB *redis.Client) *Storage {
+func New(redisDB Client) *Storage {
 	return &Storage{redisDB: redisDB}
 }
 
@@ -61,28 +68,24 @@ func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Du
 
 // ttl retrieves the time-to-live (TTL) for the provided key from the Redis cache storage.
 func (s *Storage) ttl(ctx context.Context, key string) (bool, time.Duration, error) {
-	var ttl time.Duration
-
-	hasTTL := false
-
 	item, err := s.redisDB.PTTL(ctx, key).Result()
 	if err != nil {
-		return hasTTL, ttl, err
+		return false, time.Duration(0), err
 	}
 
-	if item.Nanoseconds() >= 0 {
-		return true, item, nil
-	}
-
-	if item.Nanoseconds() == -1 {
+	if item == time.Duration(-1) {
 		return false, item, nil
 	}
 
-	if item.Nanoseconds() == -2 {
+	if item == time.Duration(-2) {
 		return false, item, anycache.ErrKeyNotExists
 	}
 
-	return hasTTL, 0 * time.Second, errors.New("unexpected TTL value returned from Redis: " + item.String())
+	if item >= 0 {
+		return true, item, nil
+	}
+
+	return false, time.Duration(0), errors.New("unexpected TTL value returned from Redis: " + item.String())
 }
 
 // Del deletes the value associated with the provided key from the Redis cache storage.
