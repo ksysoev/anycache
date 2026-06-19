@@ -29,6 +29,7 @@ func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return anycache.ErrKeyNotExists
 		}
+
 		if err != nil {
 			return err
 		}
@@ -82,6 +83,7 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return anycache.ErrKeyNotExists
 		}
+
 		if err != nil {
 			return err
 		}
