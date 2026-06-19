@@ -71,6 +71,7 @@ func (s *Storage) Del(_ context.Context, key string) error {
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
+
 		return err
 	})
 }
