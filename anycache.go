@@ -149,7 +149,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			c.wg.Go(func() {
 				defer c.warmUpLocks.Delete(key)
 
-				_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+				_, err := c.generateAndSet(c.ctx, key, req.TTL, generator)
 				if err != nil {
 					slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 				}
