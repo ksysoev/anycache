@@ -9,6 +9,7 @@ import (
 
 	"github.com/ksysoev/anycache"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -28,8 +29,8 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -45,8 +46,8 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -62,8 +63,8 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -79,8 +80,8 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -96,7 +97,7 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -112,8 +113,8 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
@@ -130,9 +131,9 @@ func TestStorage_Del(t *testing.T) {
 				s2 := anycache.NewMockCacheStorage(t)
 				s3 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(nil)
-				s3.EXPECT().Del(context.Background(), key).Return(nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
+				s3.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2, s3)
 				require.NoError(t, err)
@@ -149,8 +150,8 @@ func TestStorage_Del(t *testing.T) {
 				s2 := anycache.NewMockCacheStorage(t)
 				s3 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(nil)
-				s2.EXPECT().Del(context.Background(), key).Return(delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2, s3)
 				require.NoError(t, err)
