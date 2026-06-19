@@ -71,7 +71,7 @@ func TestWithKeyPrefix(t *testing.T) {
 }
 
 func TestWithBaseContext(t *testing.T) {
-	baseCtx := context.WithValue(t.Context(), "key", "value")
+	baseCtx := context.WithValue(t.Context(), "key", "value") //nolint:staticcheck // it's fine for test
 	option := WithBaseContext(baseCtx)
 
 	mockStorage := NewMockCacheStorage(t)
