@@ -63,7 +63,7 @@ func TestWithKeyPrefix(t *testing.T) {
 
 	assert.NoError(t, err, "Expected to get no error, but got %v", err)
 
-	mockStorage.EXPECT().Del(mock.Anything, "testPrefix::TestKey").Return(true, nil)
+	mockStorage.EXPECT().Del(mock.Anything, "testPrefix::TestKey").Return(nil)
 
 	err = cache.Invalidate(t.Context(), "TestKey")
 

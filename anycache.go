@@ -24,7 +24,7 @@ var ErrKeyNotExists = errors.New("key does not exist")
 type CacheStorage interface {
 	Get(context.Context, string) ([]byte, error)
 	Set(context.Context, string, []byte, time.Duration) error
-	Del(context.Context, string) (bool, error)
+	Del(context.Context, string) error
 	GetWithTTL(context.Context, string) ([]byte, time.Duration, error)
 }
 
@@ -238,7 +238,7 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, generator func(cont
 func (c *Cache) Invalidate(ctx context.Context, key string) error {
 	key = c.keyPrefix + key
 
-	_, err := c.Storage.Del(ctx, key)
+	err := c.Storage.Del(ctx, key)
 	if err != nil {
 		return fmt.Errorf("failed to invalidate cache for key %s: %w", key, err)
 	}

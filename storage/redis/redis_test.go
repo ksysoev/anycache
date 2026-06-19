@@ -189,10 +189,9 @@ func TestDel_ExistingKey(t *testing.T) {
 
 	mc.EXPECT().Del(mock.Anything, "key").Return(newIntResult(t, 1, nil))
 
-	deleted, err := s.Del(t.Context(), "key")
+	err := s.Del(t.Context(), "key")
 
 	require.NoError(t, err)
-	assert.True(t, deleted)
 }
 
 func TestDel_MissingKey(t *testing.T) {
@@ -201,10 +200,9 @@ func TestDel_MissingKey(t *testing.T) {
 
 	mc.EXPECT().Del(mock.Anything, "missing").Return(newIntResult(t, 0, nil))
 
-	deleted, err := s.Del(t.Context(), "missing")
+	err := s.Del(t.Context(), "missing")
 
 	require.NoError(t, err)
-	assert.False(t, deleted)
 }
 
 func TestDel_PropagatesError(t *testing.T) {
@@ -214,10 +212,9 @@ func TestDel_PropagatesError(t *testing.T) {
 	netErr := errors.New("network error")
 	mc.EXPECT().Del(mock.Anything, "key").Return(newIntResult(t, 0, netErr))
 
-	deleted, err := s.Del(t.Context(), "key")
+	err := s.Del(t.Context(), "key")
 
 	assert.ErrorIs(t, err, netErr)
-	assert.False(t, deleted)
 }
 
 func TestGetWithTTL_HitNoExpiry(t *testing.T) {

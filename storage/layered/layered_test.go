@@ -9,6 +9,7 @@ import (
 
 	"github.com/ksysoev/anycache"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,10 +18,9 @@ func TestStorage_Del(t *testing.T) {
 	delErr := errors.New("delete failed")
 
 	tests := []struct {
-		setup       func(*testing.T) *Storage
-		name        string
-		wantDeleted bool
-		wantErr     bool
+		setup   func(*testing.T) *Storage
+		name    string
+		wantErr bool
 	}{
 		{
 			name: "key deleted from all layers returns true",
@@ -29,16 +29,15 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(true, nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
 			name: "key found only in first layer returns true",
@@ -47,16 +46,15 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(false, nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
 			name: "key found only in second layer returns true",
@@ -65,16 +63,15 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(false, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(true, nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
 			name: "key not found in any layer returns false",
@@ -83,16 +80,15 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(false, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(false, nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: false,
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
 			name: "error in first layer stops iteration and returns false with error",
@@ -101,15 +97,14 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(false, delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: false,
-			wantErr:     true,
+			wantErr: true,
 		},
 		{
 			name: "error in second layer after first deleted — returns true with error",
@@ -118,16 +113,15 @@ func TestStorage_Del(t *testing.T) {
 				s1 := anycache.NewMockCacheStorage(t)
 				s2 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(false, delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     true,
+			wantErr: true,
 		},
 		{
 			name: "three layers all deleted returns true",
@@ -137,17 +131,16 @@ func TestStorage_Del(t *testing.T) {
 				s2 := anycache.NewMockCacheStorage(t)
 				s3 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s3.EXPECT().Del(context.Background(), key).Return(true, nil)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(nil)
+				s3.EXPECT().Del(mock.Anything, key).Return(nil)
 
 				store, err := New(s1, s2, s3)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     false,
+			wantErr: false,
 		},
 		{
 			name: "three layers error in middle layer after first deleted — returns true with error",
@@ -157,16 +150,15 @@ func TestStorage_Del(t *testing.T) {
 				s2 := anycache.NewMockCacheStorage(t)
 				s3 := anycache.NewMockCacheStorage(t)
 
-				s1.EXPECT().Del(context.Background(), key).Return(true, nil)
-				s2.EXPECT().Del(context.Background(), key).Return(false, delErr)
+				s1.EXPECT().Del(mock.Anything, key).Return(nil)
+				s2.EXPECT().Del(mock.Anything, key).Return(delErr)
 
 				store, err := New(s1, s2, s3)
 				require.NoError(t, err)
 
 				return store
 			},
-			wantDeleted: true,
-			wantErr:     true,
+			wantErr: true,
 		},
 	}
 
@@ -174,7 +166,7 @@ func TestStorage_Del(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			store := tt.setup(t)
 
-			gotDeleted, err := store.Del(context.Background(), key)
+			err := store.Del(t.Context(), key)
 
 			if tt.wantErr {
 				require.Error(t, err)
@@ -182,8 +174,6 @@ func TestStorage_Del(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-
-			assert.Equal(t, tt.wantDeleted, gotDeleted)
 		})
 	}
 }
