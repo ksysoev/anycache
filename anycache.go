@@ -34,7 +34,6 @@ type Cache struct {
 	ctx         context.Context
 	sf          singleflight.Group
 	cancelCtx   context.CancelFunc
-	cancel      chan *CacheReuest
 	warmUpLocks sync.Map
 	keyPrefix   string
 	wg          sync.WaitGroup
@@ -64,7 +63,6 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
-		cancel:    make(chan *CacheReuest),
 	}
 
 	for _, opt := range opts {

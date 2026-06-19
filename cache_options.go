@@ -1,5 +1,7 @@
 package anycache
 
+import "context"
+
 const (
 	maxTTLShift = 100
 )
@@ -25,5 +27,11 @@ func WithTTLRandomization(shiftPercent uint8) func(*Cache) {
 func WithKeyPrefix(prefix string) func(*Cache) {
 	return func(c *Cache) {
 		c.keyPrefix = prefix
+	}
+}
+
+func WithContext(ctx context.Context) func(*Cache) {
+	return func(c *Cache) {
+		c.ctx, c.cancelCtx = context.WithCancel(ctx)
 	}
 }
