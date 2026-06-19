@@ -67,7 +67,11 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 // Del removes the value associated with the provided key from the Badger cache storage.
 func (s *Storage) Del(_ context.Context, key string) error {
 	return s.client.Update(func(txn *badger.Txn) error {
-		return txn.Delete([]byte(key))
+		err := txn.Delete([]byte(key))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil
+		}
+		return err
 	})
 }
 
