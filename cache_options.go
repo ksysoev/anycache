@@ -30,7 +30,9 @@ func WithKeyPrefix(prefix string) func(*Cache) {
 	}
 }
 
-func WithContext(ctx context.Context) func(*Cache) {
+// WithBaseContext sets the context for cache operations,
+// allowing set base context fot background tasks like warming up cache entries.
+func WithBaseContext(ctx context.Context) func(*Cache) {
 	return func(c *Cache) {
 		c.ctx, c.cancelCtx = context.WithCancel(ctx)
 	}

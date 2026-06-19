@@ -69,3 +69,17 @@ func TestWithKeyPrefix(t *testing.T) {
 
 	assert.NoError(t, err, "Expected to get no error, but got %v", err)
 }
+
+func TestWithBaseContext(t *testing.T) {
+	baseCtx := context.WithValue(t.Context(), "key", "value")
+	option := WithBaseContext(baseCtx)
+
+	mockStorage := NewMockCacheStorage(t)
+
+	cache := New(mockStorage, option)
+
+	val, ok := cache.ctx.Value("key").(string)
+
+	assert.True(t, ok, "Expected to retrieve a string value from the base context, but got a different type")
+	assert.Equal(t, "value", val, "Expected to retrieve 'value' from the base context, but got '%v'", val)
+}
