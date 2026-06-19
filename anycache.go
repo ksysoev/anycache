@@ -34,7 +34,6 @@ type Cache struct {
 	ctx         context.Context
 	sf          singleflight.Group
 	cancelCtx   context.CancelFunc
-	cancel      chan *CacheReuest
 	warmUpLocks sync.Map
 	keyPrefix   string
 	wg          sync.WaitGroup
@@ -64,7 +63,6 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
-		cancel:    make(chan *CacheReuest),
 	}
 
 	for _, opt := range opts {
@@ -151,7 +149,7 @@ func (c *Cache) Cache(ctx context.Context, key string, generator CacheGenerator,
 			c.wg.Go(func() {
 				defer c.warmUpLocks.Delete(key)
 
-				_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+				_, err := c.generateAndSet(c.ctx, key, req.TTL, generator)
 				if err != nil {
 					slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 				}
