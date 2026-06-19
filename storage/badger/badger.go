@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/ksysoev/anycache"
 )
 
 type Storage struct {
@@ -25,6 +26,9 @@ func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 
 	err := s.client.View(func(txn *badger.Txn) error {
 		v, err := txn.Get([]byte(key))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return anycache.ErrKeyNotExists
+		}
 		if err != nil {
 			return err
 		}
@@ -59,8 +63,8 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	})
 }
 
-// Delete removes the value associated with the provided key from the Badger cache storage.
-func (s *Storage) Delete(_ context.Context, key string) error {
+// Del removes the value associated with the provided key from the Badger cache storage.
+func (s *Storage) Del(_ context.Context, key string) error {
 	return s.client.Update(func(txn *badger.Txn) error {
 		return txn.Delete([]byte(key))
 	})
@@ -75,6 +79,9 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 
 	err := s.client.View(func(txn *badger.Txn) error {
 		v, err := txn.Get([]byte(key))
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return anycache.ErrKeyNotExists
+		}
 		if err != nil {
 			return err
 		}
