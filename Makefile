@@ -2,7 +2,7 @@ test:
 	docker compose run --rm tests
 
 bench:
-	go test ./tests -run '^$$' -bench . -benchmem
+	docker compose run --rm tests go test ./tests -run '^$$' -bench . -benchmem
 
 lint:
 	golangci-lint run
