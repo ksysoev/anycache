@@ -79,8 +79,9 @@ func BenchmarkAnyCacheHit_AllBackends(b *testing.B) {
 			cache := anycache.New(store)
 			defer func() { _ = cache.Close() }()
 
+			expected := []byte("cached")
 			key := benchmarkKey(b, backend.name, "cache-hit")
-			require.NoError(b, store.Set(ctx, key, []byte("cached"), 30*time.Second))
+			require.NoError(b, store.Set(ctx, key, expected, 30*time.Second))
 
 			generator := func(context.Context) ([]byte, error) {
 				b.Fatal("generator must not be called for cache hit")
@@ -93,7 +94,7 @@ func BenchmarkAnyCacheHit_AllBackends(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
 				require.NoError(b, err)
-				require.Equal(b, []byte("cached"), v)
+				require.Equal(b, expected, v)
 			}
 		})
 	}
