@@ -52,7 +52,8 @@ func BenchmarkStorageGet_AllBackends(b *testing.B) {
 			defer cleanup()
 
 			key := benchmarkKey(b, backend.name, "get")
-			require.NoError(b, store.Set(ctx, key, []byte("value"), 30*time.Second))
+			expected := []byte("value")
+			require.NoError(b, store.Set(ctx, key, expected, 30*time.Second))
 
 			b.ReportAllocs()
 			b.ResetTimer()
@@ -60,7 +61,7 @@ func BenchmarkStorageGet_AllBackends(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				v, err := store.Get(ctx, key)
 				require.NoError(b, err)
-				require.Equal(b, []byte("value"), v)
+				require.Equal(b, expected, v)
 			}
 		})
 	}
