@@ -113,8 +113,9 @@ func BenchmarkAnyCacheMiss_AllBackends(b *testing.B) {
 			defer func() { _ = cache.Close() }()
 
 			baseKey := benchmarkKey(b, backend.name, "cache-miss")
+			expected := []byte("generated")
 			generator := func(context.Context) ([]byte, error) {
-				return []byte("generated"), nil
+				return expected, nil
 			}
 
 			const keyspace = 128 // bounded keys, explicitly deleted to force misses
@@ -124,11 +125,13 @@ func BenchmarkAnyCacheMiss_AllBackends(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				key := baseKey + ":" + strconv.Itoa(i%keyspace)
-				_ = store.Del(ctx, key)
+				if err := store.Del(ctx, key); err != nil {
+					b.Fatal(err)
+				}
 
 				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
 				require.NoError(b, err)
-				require.Equal(b, []byte("generated"), v)
+				require.Equal(b, expected, v)
 			}
 		})
 	}
