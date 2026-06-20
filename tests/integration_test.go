@@ -24,7 +24,7 @@ import (
 )
 
 type backendFactory struct {
-	new  func(t *testing.T) (anycache.CacheStorage, func())
+	new  func(tb testing.TB) (anycache.CacheStorage, func())
 	name string
 }
 
@@ -32,30 +32,30 @@ func allBackends() []backendFactory {
 	return []backendFactory{
 		{
 			name: "inmemory",
-			new: func(t *testing.T) (anycache.CacheStorage, func()) {
-				t.Helper()
+			new: func(tb testing.TB) (anycache.CacheStorage, func()) {
+				tb.Helper()
 
 				s, err := inmemory.New(256)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 
 				return s, func() { _ = s.Close() }
 			},
 		},
 		{
 			name: "badger",
-			new: func(t *testing.T) (anycache.CacheStorage, func()) {
-				t.Helper()
+			new: func(tb testing.TB) (anycache.CacheStorage, func()) {
+				tb.Helper()
 
-				db, err := badgerdb.Open(badgerdb.DefaultOptions(t.TempDir()).WithLogger(nil))
-				require.NoError(t, err)
+				db, err := badgerdb.Open(badgerdb.DefaultOptions(tb.TempDir()).WithLogger(nil))
+				require.NoError(tb, err)
 
-				return badger.New(db), func() { require.NoError(t, db.Close()) }
+				return badger.New(db), func() { require.NoError(tb, db.Close()) }
 			},
 		},
 		{
 			name: "redis",
-			new: func(t *testing.T) (anycache.CacheStorage, func()) {
-				t.Helper()
+			new: func(tb testing.TB) (anycache.CacheStorage, func()) {
+				tb.Helper()
 
 				client := goredis.NewClient(redisOptions())
 
@@ -65,7 +65,7 @@ func allBackends() []backendFactory {
 				if err := client.Ping(ctx).Err(); err != nil {
 					_ = client.Close()
 
-					t.Skipf("skipping redis backend, unavailable at %s: %v", redisOptions().Addr, err)
+					tb.Skipf("skipping redis backend, unavailable at %s: %v", redisOptions().Addr, err)
 				}
 
 				return redisstore.New(client), func() { _ = client.Close() }
@@ -73,12 +73,12 @@ func allBackends() []backendFactory {
 		},
 		{
 			name: "memcache",
-			new: func(t *testing.T) (anycache.CacheStorage, func()) {
-				t.Helper()
+			new: func(tb testing.TB) (anycache.CacheStorage, func()) {
+				tb.Helper()
 
 				client := memcache.New(memcacheAddr())
 				if err := client.Ping(); err != nil {
-					t.Skipf("skipping memcache backend, unavailable at %s: %v", memcacheAddr(), err)
+					tb.Skipf("skipping memcache backend, unavailable at %s: %v", memcacheAddr(), err)
 				}
 
 				return memcachestore.New(client), func() {}
@@ -86,17 +86,17 @@ func allBackends() []backendFactory {
 		},
 		{
 			name: "layered",
-			new: func(t *testing.T) (anycache.CacheStorage, func()) {
-				t.Helper()
+			new: func(tb testing.TB) (anycache.CacheStorage, func()) {
+				tb.Helper()
 
 				s1, err := inmemory.New(256)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 
 				s2, err := inmemory.New(256)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 
 				s, err := layered.New(s1, s2)
-				require.NoError(t, err)
+				require.NoError(tb, err)
 
 				return s, func() {
 					_ = s1.Close()
@@ -135,10 +135,10 @@ func memcacheAddr() string {
 	return fmt.Sprintf("%s:%s", host, port)
 }
 
-func uniqueKey(t *testing.T, backend string) string {
-	t.Helper()
+func uniqueKey(tb testing.TB, backend string) string {
+	tb.Helper()
 
-	testName := strings.NewReplacer("/", "_", " ", "_").Replace(t.Name())
+	testName := strings.NewReplacer("/", "_", " ", "_").Replace(tb.Name())
 
 	return fmt.Sprintf("it:%s:%s:%d", backend, testName, time.Now().UnixNano())
 }

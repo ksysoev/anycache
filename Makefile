@@ -1,6 +1,9 @@
 test:
 	docker compose run --rm tests
 
+bench:
+	docker compose run --rm tests go test ./tests -run '^$$' -bench . -benchmem
+
 lint:
 	golangci-lint run
 
