@@ -299,7 +299,7 @@ func TestIntegration_KeyPrefix_AllBackends(t *testing.T) {
 			assert.Equal(t, []byte("prefixed-value"), prefixedVal)
 
 			_, err = store.Get(t.Context(), key)
-			assert.True(t, errors.Is(err, anycache.ErrKeyNotExists))
+			assert.ErrorIs(t, err, anycache.ErrKeyNotExists)
 		})
 	}
 }
