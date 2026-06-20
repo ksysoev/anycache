@@ -165,9 +165,11 @@ func BenchmarkAnyCacheBalanced80Hit20Miss_AllBackends(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				key := hitKey
 				expected := expectedCached
+
 				if i%5 == 0 { // 20% misses, 80% hits
 					key = missKey
 					expected = expectedGenerated
+
 					if err := store.Del(ctx, missKey); err != nil {
 						b.Fatal(err)
 					}
