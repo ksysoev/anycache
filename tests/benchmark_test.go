@@ -146,12 +146,14 @@ func BenchmarkAnyCacheBalanced80Hit20Miss_AllBackends(b *testing.B) {
 			cache := anycache.New(store)
 			defer func() { _ = cache.Close() }()
 
+			expectedCached := []byte("cached")
 			hitKey := benchmarkKey(b, backend.name, "cache-balanced-hit")
-			require.NoError(b, store.Set(ctx, hitKey, []byte("cached"), 30*time.Second))
+			require.NoError(b, store.Set(ctx, hitKey, expectedCached, 30*time.Second))
 
 			missKey := benchmarkKey(b, backend.name, "cache-balanced-miss")
+			expectedGenerated := []byte("generated")
 			generator := func(context.Context) ([]byte, error) {
-				return []byte("generated"), nil
+				return expectedGenerated, nil
 			}
 
 			b.ReportAllocs()
@@ -159,11 +161,13 @@ func BenchmarkAnyCacheBalanced80Hit20Miss_AllBackends(b *testing.B) {
 
 			for i := 0; i < b.N; i++ {
 				key := hitKey
-				expected := []byte("cached")
+				expected := expectedCached
 				if i%5 == 0 { // 20% misses, 80% hits
 					key = missKey
-					expected = []byte("generated")
-					_ = store.Del(ctx, missKey) // force miss while keeping keyspace bounded
+					expected = expectedGenerated
+					if err := store.Del(ctx, missKey); err != nil {
+						b.Fatal(err)
+					}
 				}
 
 				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
