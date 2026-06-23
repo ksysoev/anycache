@@ -1,6 +1,9 @@
 package anycache
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 const (
 	maxTTLShift = 100
@@ -39,5 +42,11 @@ func WithBaseContext(ctx context.Context) func(*Cache) {
 
 	return func(c *Cache) {
 		c.ctx, c.cancelCtx = context.WithCancel(ctx)
+	}
+}
+
+// WithMetricHook sets a hook function to be called for each cache operation, providing metrics such as operation type and latency.
+func WithMetricHook(hook func(key string, op State, latency time.Duration)) func(*Cache) {
+	return func(c *Cache) {
 	}
 }

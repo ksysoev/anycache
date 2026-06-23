@@ -19,6 +19,20 @@ const (
 	HundredPercent = 100
 )
 
+type State string
+
+const (
+	CacheHit    State = "hit"
+	CacheMiss   State = "miss"
+	CacheWarmUp State = "warm_up"
+	CacheError  State = "error"
+)
+
+type Result struct {
+	state State
+	data  []byte
+}
+
 var ErrKeyNotExists = errors.New("key does not exist")
 
 // CacheStorage
@@ -35,6 +49,7 @@ type Cache struct {
 	ctx         context.Context
 	sf          singleflight.Group
 	cancelCtx   context.CancelFunc
+	observer    func(key string, op State, latency time.Duration)
 	warmUpLocks sync.Map
 	keyPrefix   string
 	wg          sync.WaitGroup
@@ -94,6 +109,15 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 	req := CacheReuest{
 		TTL: ttl,
 	}
+	var state State
+
+	start := time.Now()
+
+	defer func() {
+		if c.observer != nil {
+			c.observer(key, state, time.Since(start))
+		}
+	}()
 
 	for _, opt := range opts {
 		opt(&req)
@@ -105,11 +129,13 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("cache.Cache panicked: %v", r)
-				value = ""
+				value = nil
 			}
 		}()
 
 		var (
+			state              State
+			data               []byte
 			needWarmUp         bool
 			acquiredWarmUpLock bool
 			warmUpStarted      bool
@@ -127,21 +153,27 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
 			acquiredWarmUpLock = !warmUpLockBusy
 
-			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
+			data, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
 			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 			if err == nil && readyForWarmUp {
 				needWarmUp = true
 			}
 		} else {
-			value, err = c.Storage.Get(c.ctx, key)
+			data, err = c.Storage.Get(c.ctx, key)
 		}
 
 		switch {
 		case errors.Is(err, ErrKeyNotExists):
-			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
+			state = CacheMiss
+			data, err = c.generateAndSet(ctx, key, req.TTL, generator)
+			if err != nil {
+				return nil, err
+			}
 		case err != nil:
-			return "", err
+			return nil, err
+		default:
+			state = CacheHit
 		}
 
 		if needWarmUp && acquiredWarmUpLock {
@@ -155,9 +187,10 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			})
 
 			warmUpStarted = true
+			state = CacheWarmUp
 		}
 
-		return value, err
+		return &Result{data: data, state: CacheHit}, err
 	})
 
 	select {
@@ -168,12 +201,13 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			return nil, resp.Err
 		}
 
-		val, ok := resp.Val.([]byte)
+		val, ok := resp.Val.(*Result)
 		if !ok {
 			return nil, errors.New("unexpected value type returned from generator")
 		}
 
-		return val, nil
+		state = val.state
+		return val.data, nil
 	}
 }
 
