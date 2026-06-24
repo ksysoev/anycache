@@ -22,9 +22,9 @@ func TestWithTTLRandomization(t *testing.T) {
 		return ttl >= 90*time.Second && ttl <= 110*time.Second
 	})).Return(nil)
 
-	_, err := cache.Cache(t.Context(), "TestKey", time.Second, func(_ context.Context) ([]byte, error) {
+	_, err := cache.Cache(t.Context(), "TestKey", 100*time.Second, func(_ context.Context) ([]byte, error) {
 		return []byte("testValue"), nil
-	}, WithTTL(100*time.Second))
+	})
 
 	assert.NoError(t, err, "Expected to get no error, but got %v", err)
 }
