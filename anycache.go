@@ -109,6 +109,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 	req := CacheReuest{
 		TTL: ttl,
 	}
+
 	var state State
 
 	start := time.Now()
