@@ -92,7 +92,7 @@ func BenchmarkAnyCacheHit_AllBackends(b *testing.B) {
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
+				v, err := cache.Cache(ctx, key, 30*time.Second, generator)
 				require.NoError(b, err)
 				require.Equal(b, expected, v)
 			}
@@ -129,7 +129,7 @@ func BenchmarkAnyCacheMiss_AllBackends(b *testing.B) {
 					b.Fatal(err)
 				}
 
-				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
+				v, err := cache.Cache(ctx, key, 30*time.Second, generator)
 				require.NoError(b, err)
 				require.Equal(b, expected, v)
 			}
@@ -175,7 +175,7 @@ func BenchmarkAnyCacheBalanced80Hit20Miss_AllBackends(b *testing.B) {
 					}
 				}
 
-				v, err := cache.Cache(ctx, key, generator, anycache.WithTTL(30*time.Second))
+				v, err := cache.Cache(ctx, key, 30*time.Second, generator)
 				require.NoError(b, err)
 				require.Equal(b, expected, v)
 			}

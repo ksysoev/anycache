@@ -56,10 +56,11 @@ func main() {
     }
 
     value, err := cache.CacheS(
+        context.Background(),
         "random_number_key", 
+        5 * time.Minute, 
         generator, 
-        WithTTL(5 * time.Minute), 
-        WithWarmUpTTL(1 * time.Minute)
+        anycache.WithWarmUpTTL(1 * time.Minute)
     )
 
     if err != nil {
