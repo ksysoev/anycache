@@ -79,7 +79,7 @@ func TestCacheWarmingUp(t *testing.T) {
 	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
 	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).Return(nil)
 
-	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", time.Second, getGenerator([]byte("newTestValue"), nil), WithTTL(2*time.Second), WithWarmUpTTL(1*time.Second))
+	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", 2*time.Second, getGenerator([]byte("newTestValue"), nil), WithWarmUpTTL(1*time.Second))
 	if err != nil {
 		t.Errorf("Expected to get no error, but got %v", err)
 	}

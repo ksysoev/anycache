@@ -1,4 +1,5 @@
-// Package anycache provide laze caching with posibility to use diffent cache storages
+// Package anycache provide laze caching with posibility to use diffent cache
+// storages
 package anycache
 
 import (
@@ -70,13 +71,6 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	}
 
 	return &c
-}
-
-// WithTTL sets TTL for cache item
-func WithTTL(ttl time.Duration) CacheItemOptions {
-	return func(req *CacheReuest) {
-		req.TTL = ttl
-	}
 }
 
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
