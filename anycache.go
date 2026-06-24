@@ -80,7 +80,7 @@ func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	}
 }
 
-// Cache caches the result of the generator function for the given key.
+// Cache caches the result of the generator function for the given key, for the specified TTL (time-to-live) duration.
 // If the key already exists in the cache, the cached value is returned.
 // Otherwise, the generator function is called to generate a new value,
 // which is then cached and returned.
