@@ -57,8 +57,8 @@ func main() {
 
     value, err := cache.CacheS(
         "random_number_key", 
+        5 * time.Minute, 
         generator, 
-        WithTTL(5 * time.Minute), 
         WithWarmUpTTL(1 * time.Minute)
     )
 
