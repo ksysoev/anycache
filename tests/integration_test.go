@@ -162,11 +162,11 @@ func TestIntegration_CacheMissThenHit_AllBackends(t *testing.T) {
 
 			key := uniqueKey(t, backend.name)
 
-			v1, err := cache.Cache(t.Context(), key, generator, anycache.WithTTL(5*time.Second))
+			v1, err := cache.Cache(t.Context(), key, 5*time.Second, generator)
 			require.NoError(t, err)
 			assert.Equal(t, []byte("value-1"), v1)
 
-			v2, err := cache.Cache(t.Context(), key, generator, anycache.WithTTL(5*time.Second))
+			v2, err := cache.Cache(t.Context(), key, 5*time.Second, generator)
 			require.NoError(t, err)
 			assert.Equal(t, []byte("value-1"), v2)
 			assert.EqualValues(t, 1, calls.Load(), "generator must be called only once for a cache hit")
@@ -193,11 +193,11 @@ func TestIntegration_CacheS_AllBackends(t *testing.T) {
 
 			key := uniqueKey(t, backend.name)
 
-			v1, err := cache.CacheS(t.Context(), key, generator, anycache.WithTTL(5*time.Second))
+			v1, err := cache.CacheS(t.Context(), key, 5*time.Second, generator)
 			require.NoError(t, err)
 			assert.Equal(t, "value", v1)
 
-			v2, err := cache.CacheS(t.Context(), key, generator, anycache.WithTTL(5*time.Second))
+			v2, err := cache.CacheS(t.Context(), key, 5*time.Second, generator)
 			require.NoError(t, err)
 			assert.Equal(t, "value", v2)
 			assert.EqualValues(t, 1, calls.Load())
@@ -231,13 +231,13 @@ func TestIntegration_CacheStruct_AllBackends(t *testing.T) {
 
 			var p1 payload
 
-			err := cache.CacheStruct(t.Context(), key, generator, &p1, anycache.WithTTL(5*time.Second))
+			err := cache.CacheStruct(t.Context(), key, 5*time.Second, generator, &p1)
 			require.NoError(t, err)
 			assert.Equal(t, payload{Name: "john", Count: 1}, p1)
 
 			var p2 payload
 
-			err = cache.CacheStruct(t.Context(), key, generator, &p2, anycache.WithTTL(5*time.Second))
+			err = cache.CacheStruct(t.Context(), key, 5*time.Second, generator, &p2)
 			require.NoError(t, err)
 			assert.Equal(t, payload{Name: "john", Count: 1}, p2)
 			assert.EqualValues(t, 1, calls.Load())
@@ -257,17 +257,17 @@ func TestIntegration_Invalidate_AllBackends(t *testing.T) {
 
 			key := uniqueKey(t, backend.name)
 
-			v1, err := cache.Cache(t.Context(), key, func(context.Context) ([]byte, error) {
+			v1, err := cache.Cache(t.Context(), key, 30*time.Second, func(context.Context) ([]byte, error) {
 				return []byte("v1"), nil
-			}, anycache.WithTTL(30*time.Second))
+			})
 			require.NoError(t, err)
 			assert.Equal(t, []byte("v1"), v1)
 
 			require.NoError(t, cache.Invalidate(t.Context(), key))
 
-			v2, err := cache.Cache(t.Context(), key, func(context.Context) ([]byte, error) {
+			v2, err := cache.Cache(t.Context(), key, 30*time.Second, func(context.Context) ([]byte, error) {
 				return []byte("v2"), nil
-			}, anycache.WithTTL(30*time.Second))
+			})
 			require.NoError(t, err)
 			assert.Equal(t, []byte("v2"), v2)
 		})
@@ -287,9 +287,9 @@ func TestIntegration_KeyPrefix_AllBackends(t *testing.T) {
 			defer func() { _ = cache.Close() }()
 
 			key := "my-key"
-			v, err := cache.Cache(t.Context(), key, func(context.Context) ([]byte, error) {
+			v, err := cache.Cache(t.Context(), key, 10*time.Second, func(context.Context) ([]byte, error) {
 				return []byte("prefixed-value"), nil
-			}, anycache.WithTTL(10*time.Second))
+			})
 			require.NoError(t, err)
 			assert.Equal(t, []byte("prefixed-value"), v)
 
@@ -326,8 +326,8 @@ func TestIntegration_WarmUpTTL_AllBackends(t *testing.T) {
 			v, err := cache.Cache(
 				t.Context(),
 				key,
+				10*time.Second,
 				generator,
-				anycache.WithTTL(10*time.Second),
 				anycache.WithWarmUpTTL(4*time.Second),
 			)
 			require.NoError(t, err)
@@ -383,7 +383,7 @@ func TestIntegration_Singleflight_AllBackends(t *testing.T) {
 				go func() {
 					defer wg.Done()
 
-					v, err := cache.Cache(t.Context(), key, generator, anycache.WithTTL(10*time.Second))
+					v, err := cache.Cache(t.Context(), key, 10*time.Second, generator)
 					if err != nil {
 						errCh <- err
 						return
