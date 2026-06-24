@@ -207,7 +207,7 @@ func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, gener
 // The generator function is called to generate the value if it is not already cached.
 // The result parameter is a pointer to the struct that will be populated with the cached value.
 // The opts parameter is optional and can be used to set additional cache item options.
-// WithTTL sets TTL for cache item
+// The ttl parameter must be greater than zero and controls the cache expiration.
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 // Returns an error if there was a problem caching or unmarshalling the value.
 func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
