@@ -88,9 +88,12 @@ func TestWithMetricHook(t *testing.T) {
 	mockStorage := NewMockCacheStorage(t)
 
 	calls := 0
-	var observedKey string
-	var observedState State
-	var observedLatency time.Duration
+
+	var (
+		observedKey     string
+		observedState   State
+		observedLatency time.Duration
+	)
 
 	cache := New(mockStorage, WithMetricHook(func(key string, op State, latency time.Duration) {
 		calls++

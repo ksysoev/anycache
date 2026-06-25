@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
+//nolint:unparam // this function is used in tests and always returns the same value and error, so the parameters are not used.
 func getGenerator(val []byte, err error) CacheGenerator {
 	return func(_ context.Context) ([]byte, error) {
 		return val, err
@@ -91,8 +92,11 @@ func TestCacheWarmingUp(t *testing.T) {
 
 func TestCacheMetricHook_WarmUp(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	var observedState State
-	var observedLatency time.Duration
+
+	var (
+		observedState   State
+		observedLatency time.Duration
+	)
 
 	cache := New(store, WithMetricHook(func(_ string, op State, latency time.Duration) {
 		observedState = op
@@ -185,9 +189,12 @@ func TestCancelingRequest(t *testing.T) {
 
 func TestCacheMetricHook_Miss(t *testing.T) {
 	store := NewMockCacheStorage(t)
-	var observedKey string
-	var observedState State
-	var observedLatency time.Duration
+
+	var (
+		observedKey     string
+		observedState   State
+		observedLatency time.Duration
+	)
 
 	cache := New(store, WithMetricHook(func(key string, op State, latency time.Duration) {
 		observedKey = key
@@ -209,6 +216,7 @@ func TestCacheMetricHook_Miss(t *testing.T) {
 
 func TestCacheMetricHook_Hit(t *testing.T) {
 	store := NewMockCacheStorage(t)
+
 	var observedState State
 
 	cache := New(store, WithMetricHook(func(_ string, op State, _ time.Duration) {
@@ -226,6 +234,7 @@ func TestCacheMetricHook_Hit(t *testing.T) {
 
 func TestCacheMetricHook_Error(t *testing.T) {
 	store := NewMockCacheStorage(t)
+
 	var observedState State
 
 	cache := New(store, WithMetricHook(func(_ string, op State, _ time.Duration) {
@@ -243,6 +252,7 @@ func TestCacheMetricHook_Error(t *testing.T) {
 
 func TestCacheMetricHook_KeyUsesPrefixedStorageKey(t *testing.T) {
 	store := NewMockCacheStorage(t)
+
 	var observedKey string
 
 	cache := New(store,
