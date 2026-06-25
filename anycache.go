@@ -167,6 +167,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		switch {
 		case errors.Is(err, ErrKeyNotExists):
 			state = CacheMiss
+
 			data, err = c.generateAndSet(ctx, key, req.TTL, generator)
 			if err != nil {
 				return nil, err
@@ -191,7 +192,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			state = CacheWarmUp
 		}
 
-		return &Result{data: data, state: CacheHit}, err
+		return &Result{data: data, state: state}, err
 	})
 
 	select {
@@ -208,6 +209,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		}
 
 		state = val.state
+
 		return val.data, nil
 	}
 }
