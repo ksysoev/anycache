@@ -110,6 +110,12 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		TTL: ttl,
 	}
 
+	for _, opt := range opts {
+		opt(&req)
+	}
+
+	key = c.keyPrefix + key
+
 	state := CacheError
 	start := time.Now()
 
@@ -118,12 +124,6 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			c.observer(key, state, time.Since(start))
 		}
 	}()
-
-	for _, opt := range opts {
-		opt(&req)
-	}
-
-	key = c.keyPrefix + key
 
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {

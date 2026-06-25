@@ -83,3 +83,32 @@ func TestWithBaseContext(t *testing.T) {
 	assert.True(t, ok, "Expected to retrieve a string value from the base context, but got a different type")
 	assert.Equal(t, "value", val, "Expected to retrieve 'value' from the base context, but got '%v'", val)
 }
+
+func TestWithMetricHook(t *testing.T) {
+	mockStorage := NewMockCacheStorage(t)
+
+	calls := 0
+	var observedKey string
+	var observedState State
+	var observedLatency time.Duration
+
+	cache := New(mockStorage, WithMetricHook(func(key string, op State, latency time.Duration) {
+		calls++
+		observedKey = key
+		observedState = op
+		observedLatency = latency
+	}))
+
+	mockStorage.EXPECT().Get(mock.Anything, "TestKey").Return(nil, ErrKeyNotExists)
+	mockStorage.EXPECT().Set(mock.Anything, "TestKey", []byte("testValue"), mock.Anything).Return(nil)
+
+	_, err := cache.Cache(t.Context(), "TestKey", time.Second, func(_ context.Context) ([]byte, error) {
+		return []byte("testValue"), nil
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, "TestKey", observedKey)
+	assert.Equal(t, CacheMiss, observedState)
+	assert.GreaterOrEqual(t, observedLatency, time.Duration(0))
+}

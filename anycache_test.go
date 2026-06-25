@@ -89,6 +89,28 @@ func TestCacheWarmingUp(t *testing.T) {
 	time.Sleep(time.Millisecond)
 }
 
+func TestCacheMetricHook_WarmUp(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	var observedState State
+	var observedLatency time.Duration
+
+	cache := New(store, WithMetricHook(func(_ string, op State, latency time.Duration) {
+		observedState = op
+		observedLatency = latency
+	}))
+
+	store.EXPECT().GetWithTTL(mock.Anything, "metric-warmup").Return([]byte("cached"), 500*time.Millisecond, nil)
+	store.EXPECT().Set(mock.Anything, "metric-warmup", []byte("fresh"), 2*time.Second).Return(nil)
+
+	result, err := cache.Cache(t.Context(), "metric-warmup", 2*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("cached"), result)
+	assert.Equal(t, CacheWarmUp, observedState)
+	assert.GreaterOrEqual(t, observedLatency, time.Duration(0))
+	assert.NoError(t, cache.Close())
+}
+
 func TestRandomizeTTL(t *testing.T) {
 	ttl := randomizeTTL(10, 100*time.Second)
 
@@ -159,6 +181,84 @@ func TestCancelingRequest(t *testing.T) {
 	}
 
 	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
+}
+
+func TestCacheMetricHook_Miss(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	var observedKey string
+	var observedState State
+	var observedLatency time.Duration
+
+	cache := New(store, WithMetricHook(func(key string, op State, latency time.Duration) {
+		observedKey = key
+		observedState = op
+		observedLatency = latency
+	}))
+
+	store.EXPECT().Get(mock.Anything, "metric-miss").Return(nil, ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "metric-miss", []byte("generated"), mock.Anything).Return(nil)
+
+	result, err := cache.Cache(t.Context(), "metric-miss", time.Second, getGenerator([]byte("generated"), nil))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("generated"), result)
+	assert.Equal(t, "metric-miss", observedKey)
+	assert.Equal(t, CacheMiss, observedState)
+	assert.GreaterOrEqual(t, observedLatency, time.Duration(0))
+}
+
+func TestCacheMetricHook_Hit(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	var observedState State
+
+	cache := New(store, WithMetricHook(func(_ string, op State, _ time.Duration) {
+		observedState = op
+	}))
+
+	store.EXPECT().Get(mock.Anything, "metric-hit").Return([]byte("cached"), nil)
+
+	result, err := cache.Cache(t.Context(), "metric-hit", time.Second, getGenerator([]byte("generated"), nil))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("cached"), result)
+	assert.Equal(t, CacheHit, observedState)
+}
+
+func TestCacheMetricHook_Error(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	var observedState State
+
+	cache := New(store, WithMetricHook(func(_ string, op State, _ time.Duration) {
+		observedState = op
+	}))
+
+	store.EXPECT().Get(mock.Anything, "metric-error").Return(nil, assert.AnError)
+
+	result, err := cache.Cache(t.Context(), "metric-error", time.Second, getGenerator([]byte("generated"), nil))
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+	assert.Equal(t, CacheError, observedState)
+}
+
+func TestCacheMetricHook_KeyUsesPrefixedStorageKey(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	var observedKey string
+
+	cache := New(store,
+		WithKeyPrefix("p::"),
+		WithMetricHook(func(key string, _ State, _ time.Duration) {
+			observedKey = key
+		}),
+	)
+
+	store.EXPECT().Get(mock.Anything, "p::metric-prefixed").Return(nil, ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "p::metric-prefixed", []byte("generated"), mock.Anything).Return(nil)
+
+	_, err := cache.Cache(t.Context(), "metric-prefixed", time.Second, getGenerator([]byte("generated"), nil))
+
+	assert.NoError(t, err)
+	assert.Equal(t, "p::metric-prefixed", observedKey)
 }
 
 func TestCache_Invalidate(t *testing.T) {
