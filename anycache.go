@@ -28,7 +28,7 @@ const (
 	CacheError  State = "error"
 )
 
-type Result struct {
+type result struct {
 	state State
 	data  []byte
 }
@@ -110,8 +110,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		TTL: ttl,
 	}
 
-	var state State
-
+	state := CacheError
 	start := time.Now()
 
 	defer func() {
@@ -192,7 +191,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			state = CacheWarmUp
 		}
 
-		return &Result{data: data, state: state}, err
+		return &result{data: data, state: state}, err
 	})
 
 	select {
@@ -203,7 +202,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			return nil, resp.Err
 		}
 
-		val, ok := resp.Val.(*Result)
+		val, ok := resp.Val.(*result)
 		if !ok {
 			return nil, errors.New("unexpected value type returned from generator")
 		}
