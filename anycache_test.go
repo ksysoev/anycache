@@ -233,7 +233,7 @@ func TestCacheMetricHook_Error(t *testing.T) {
 	assert.Equal(t, CacheError, observedState)
 }
 
-func TestCacheMetricHook_KeyUsesPrefixedStorageKey(t *testing.T) {
+func TestCacheMetricHook_KeyNotUsesPrefixedStorageKey(t *testing.T) {
 	store := NewMockCacheStorage(t)
 
 	var observedKey string
@@ -245,13 +245,13 @@ func TestCacheMetricHook_KeyUsesPrefixedStorageKey(t *testing.T) {
 		}),
 	)
 
-	store.EXPECT().Get(mock.Anything, "p::metric-prefixed").Return(nil, ErrKeyNotExists)
-	store.EXPECT().Set(mock.Anything, "p::metric-prefixed", []byte("generated"), mock.Anything).Return(nil)
+	store.EXPECT().Get(mock.Anything, "p::metric-key").Return(nil, ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "p::metric-key", []byte("generated"), mock.Anything).Return(nil)
 
-	_, err := cache.Cache(t.Context(), "metric-prefixed", time.Second, getGenerator([]byte("generated"), nil))
+	_, err := cache.Cache(t.Context(), "metric-key", time.Second, getGenerator([]byte("generated"), nil))
 
 	assert.NoError(t, err)
-	assert.Equal(t, "p::metric-prefixed", observedKey)
+	assert.Equal(t, "metric-key", observedKey)
 }
 
 func TestCache_Invalidate(t *testing.T) {

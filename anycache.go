@@ -57,8 +57,9 @@ type Cache struct {
 }
 
 type CacheReuest struct {
-	TTL       time.Duration
-	WarmUpTTL time.Duration
+	MetricHook func(key string, op State, latency time.Duration)
+	TTL        time.Duration
+	WarmUpTTL  time.Duration
 }
 
 type (
@@ -100,23 +101,25 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 	}
 
 	req := CacheReuest{
-		TTL: ttl,
+		TTL:        ttl,
+		MetricHook: c.observer,
 	}
 
 	for _, opt := range opts {
 		opt(&req)
 	}
 
-	key = c.keyPrefix + key
-
 	state := CacheError
 	start := time.Now()
 
-	defer func() {
-		if c.observer != nil {
-			c.observer(key, state, time.Since(start))
-		}
-	}()
+	if req.MetricHook != nil {
+		defer func(key string, start time.Time) {
+			req.MetricHook(key, state, time.Since(start))
+		}(key, start)
+	}
+
+	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
+	key = c.keyPrefix + key
 
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
