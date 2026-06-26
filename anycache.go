@@ -145,6 +145,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
 			defer cancel()
 		}
+
 		var (
 			sfState            State
 			data               []byte
