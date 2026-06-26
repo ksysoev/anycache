@@ -57,9 +57,11 @@ type Cache struct {
 }
 
 type Request struct {
+	ctx        context.Context
 	MetricHook func(key string, op State, latency time.Duration)
 	TTL        time.Duration
 	WarmUpTTL  time.Duration
+	Timeout    time.Duration
 }
 
 type (
@@ -155,21 +157,21 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
 			acquiredWarmUpLock = !warmUpLockBusy
 
-			data, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
+			data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
 
 			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 			if err == nil && readyForWarmUp {
 				needWarmUp = true
 			}
 		} else {
-			data, err = c.Storage.Get(c.ctx, key)
+			data, err = c.Storage.Get(req.ctx, key)
 		}
 
 		switch {
 		case errors.Is(err, ErrKeyNotExists):
 			sfState = CacheMiss
 
-			data, err = c.generateAndSet(ctx, key, req.TTL, generator)
+			data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
 			if err != nil {
 				return nil, err
 			}
@@ -183,7 +185,16 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			c.wg.Go(func() {
 				defer c.warmUpLocks.Delete(key)
 
-				_, err := c.generateAndSet(c.ctx, key, req.TTL, generator)
+				ctx := c.ctx
+
+				if req.Timeout > 0 {
+					var cancel context.CancelFunc
+
+					ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+					defer cancel()
+				}
+
+				_, err := c.generateAndSet(ctx, key, req.TTL, generator)
 				if err != nil {
 					slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 				}
