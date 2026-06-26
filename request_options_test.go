@@ -66,3 +66,20 @@ func TestWithMetric_PanicsOnNilHook(t *testing.T) {
 		WithMetric(nil)
 	})
 }
+
+func TestWithTimeout_SetsRequestTimeout(t *testing.T) {
+	req := &Request{}
+	timeout := 250 * time.Millisecond
+
+	WithTimeout(timeout)(req)
+
+	assert.Equal(t, timeout, req.Timeout)
+}
+
+func TestWithTimeout_ZeroDuration(t *testing.T) {
+	req := &Request{}
+
+	WithTimeout(0)(req)
+
+	assert.Zero(t, req.Timeout)
+}

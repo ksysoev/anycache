@@ -3,6 +3,7 @@ package anycache
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -168,6 +169,207 @@ func TestCancelingRequest(t *testing.T) {
 	}
 
 	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
+}
+
+func TestCache_DefaultContextForwarding_NoWithTimeout(t *testing.T) {
+	type ctxKey string
+
+	const key ctxKey = "request-id"
+
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	ctx := context.WithValue(context.Background(), key, "req-123")
+
+	store.EXPECT().Get(mock.Anything, "ctx-forwarding").RunAndReturn(func(gotCtx context.Context, _ string) ([]byte, error) {
+		assert.Equal(t, "req-123", gotCtx.Value(key))
+		return nil, ErrKeyNotExists
+	})
+	store.EXPECT().Set(mock.Anything, "ctx-forwarding", []byte("generated"), mock.Anything).RunAndReturn(func(gotCtx context.Context, _ string, _ []byte, _ time.Duration) error {
+		assert.Equal(t, "req-123", gotCtx.Value(key))
+		return nil
+	})
+
+	result, err := cache.Cache(ctx, "ctx-forwarding", time.Second, func(gotCtx context.Context) ([]byte, error) {
+		assert.Equal(t, "req-123", gotCtx.Value(key))
+		return []byte("generated"), nil
+	})
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("generated"), result)
+}
+
+func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T) {
+	t.Run("deadline context", func(t *testing.T) {
+		store := NewMockCacheStorage(t)
+		cache := New(store)
+
+		store.EXPECT().Get(mock.Anything, "ctx-deadline").Return(nil, ErrKeyNotExists)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		generatorStarted := make(chan struct{})
+
+		result, err := cache.Cache(ctx, "ctx-deadline", time.Second, func(genCtx context.Context) ([]byte, error) {
+			close(generatorStarted)
+			<-genCtx.Done()
+
+			return nil, genCtx.Err()
+		})
+
+		select {
+		case <-generatorStarted:
+		case <-time.After(time.Second):
+			t.Fatal("generator did not start")
+		}
+
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+
+	t.Run("manual cancel context", func(t *testing.T) {
+		store := NewMockCacheStorage(t)
+		cache := New(store)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		store.EXPECT().Get(mock.Anything, "ctx-cancel").Maybe().Return(nil, context.Canceled)
+
+		result, err := cache.Cache(ctx, "ctx-cancel", time.Second, func(genCtx context.Context) ([]byte, error) {
+			<-genCtx.Done()
+			return nil, genCtx.Err()
+		})
+
+		assert.Nil(t, result)
+		assert.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestCache_WithTimeout_DecouplesWorkFromCallerContext(t *testing.T) {
+	type ctxKey string
+
+	const key ctxKey = "request-id"
+
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	generatorStarted := make(chan struct{})
+	releaseGenerator := make(chan struct{})
+	setCalled := make(chan struct{})
+
+	store.EXPECT().Get(mock.Anything, "timeout-decouple").Return(nil, ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "timeout-decouple", []byte("generated"), mock.Anything).RunAndReturn(func(setCtx context.Context, _ string, _ []byte, _ time.Duration) error {
+		assert.Nil(t, setCtx.Value(key), "expected internal context to be decoupled from caller values when WithTimeout is used")
+		close(setCalled)
+
+		return nil
+	}).Once()
+
+	callerCtx, cancelCaller := context.WithCancel(context.WithValue(context.Background(), key, "caller-value"))
+	errCh := make(chan error, 1)
+
+	go func() {
+		_, err := cache.Cache(callerCtx, "timeout-decouple", time.Second, func(genCtx context.Context) ([]byte, error) {
+			assert.Nil(t, genCtx.Value(key), "expected generator context to be decoupled from caller values when WithTimeout is used")
+			close(generatorStarted)
+			<-releaseGenerator
+
+			return []byte("generated"), nil
+		}, WithTimeout(300*time.Millisecond))
+		errCh <- err
+	}()
+
+	select {
+	case <-generatorStarted:
+	case <-time.After(time.Second):
+		t.Fatal("generator did not start")
+	}
+
+	cancelCaller()
+	close(releaseGenerator)
+
+	select {
+	case <-setCalled:
+	case <-time.After(time.Second):
+		t.Fatal("storage set was not called after caller cancellation")
+	}
+
+	select {
+	case err := <-errCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("cache call did not return")
+	}
+}
+
+func TestCache_WithTimeout_SingleflightContinuesAfterInitiatorCancel(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	var generatorCalls atomic.Int32
+
+	generatorStarted := make(chan struct{})
+	releaseGenerator := make(chan struct{})
+
+	store.EXPECT().Get(mock.Anything, "timeout-singleflight").Return(nil, ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "timeout-singleflight", []byte("generated"), mock.Anything).Return(nil).Once()
+
+	initiatorCtx, cancelInitiator := context.WithCancel(context.Background())
+	initiatorErrCh := make(chan error, 1)
+	waiterValCh := make(chan []byte, 1)
+	waiterErrCh := make(chan error, 1)
+
+	go func() {
+		_, err := cache.Cache(initiatorCtx, "timeout-singleflight", time.Second, func(_ context.Context) ([]byte, error) {
+			generatorCalls.Add(1)
+			close(generatorStarted)
+			<-releaseGenerator
+
+			return []byte("generated"), nil
+		}, WithTimeout(300*time.Millisecond))
+		initiatorErrCh <- err
+	}()
+
+	select {
+	case <-generatorStarted:
+	case <-time.After(time.Second):
+		t.Fatal("generator did not start")
+	}
+
+	go func() {
+		val, err := cache.Cache(t.Context(), "timeout-singleflight", time.Second, getGenerator([]byte("unused"), nil), WithTimeout(300*time.Millisecond))
+		waiterValCh <- val
+
+		waiterErrCh <- err
+	}()
+
+	cancelInitiator()
+	close(releaseGenerator)
+
+	select {
+	case err := <-initiatorErrCh:
+		assert.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("initiator call did not return")
+	}
+
+	select {
+	case err := <-waiterErrCh:
+		assert.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("waiter call did not return")
+	}
+
+	select {
+	case val := <-waiterValCh:
+		assert.Equal(t, []byte("generated"), val)
+	case <-time.After(time.Second):
+		t.Fatal("waiter value was not returned")
+	}
+
+	assert.Equal(t, int32(1), generatorCalls.Load(), "expected shared generation to run once")
 }
 
 func TestCacheMetricHook_Miss(t *testing.T) {
