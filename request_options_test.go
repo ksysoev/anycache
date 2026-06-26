@@ -22,7 +22,7 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
 
-	time.Sleep(time.Millisecond)
+assert.NoError(t, cache.Close())
 }
 
 func TestWithMetric_OverridesCacheMetricHook(t *testing.T) {
