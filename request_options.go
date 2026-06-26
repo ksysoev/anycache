@@ -4,7 +4,7 @@ import "time"
 
 // WithWarmUpTTL sets TTL threshold for cache item to be warmed up
 func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
-	return func(req *CacheReuest) {
+	return func(req *Request) {
 		req.WarmUpTTL = ttl
 	}
 }
@@ -15,7 +15,7 @@ func WithMetric(hook func(key string, op State, latency time.Duration)) CacheIte
 		panic("metric hook cannot be nil")
 	}
 
-	return func(req *CacheReuest) {
+	return func(req *Request) {
 		req.MetricHook = hook
 	}
 }
