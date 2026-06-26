@@ -114,6 +114,12 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 	if req.MetricHook != nil {
 		defer func(key string, start time.Time) {
+			defer func() {
+				if err := recover(); err != nil {
+					slog.Error("MetricHook panicked", "key", key, "error", err)
+				}
+			}()
+
 			req.MetricHook(key, state, time.Since(start))
 		}(key, start)
 	}
@@ -130,7 +136,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		}()
 
 		var (
-			state              State
+			sfState            State
 			data               []byte
 			needWarmUp         bool
 			acquiredWarmUpLock bool
@@ -161,7 +167,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 		switch {
 		case errors.Is(err, ErrKeyNotExists):
-			state = CacheMiss
+			sfState = CacheMiss
 
 			data, err = c.generateAndSet(ctx, key, req.TTL, generator)
 			if err != nil {
@@ -170,7 +176,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		case err != nil:
 			return nil, err
 		default:
-			state = CacheHit
+			sfState = CacheHit
 		}
 
 		if needWarmUp && acquiredWarmUpLock {
@@ -184,10 +190,10 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			})
 
 			warmUpStarted = true
-			state = CacheWarmUp
+			sfState = CacheWarmUp
 		}
 
-		return &result{data: data, state: state}, err
+		return &result{data: data, state: sfState}, err
 	})
 
 	select {
@@ -200,7 +206,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 		val, ok := resp.Val.(*result)
 		if !ok {
-			return nil, errors.New("unexpected value type returned from generator")
+			return nil, errors.New("unexpected value type returned from cache processing")
 		}
 
 		state = val.state
