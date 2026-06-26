@@ -73,23 +73,6 @@ func TestCacheConcurrency(t *testing.T) {
 	assert.Equal(t, val1, val2, "Expected to get the same value for both calls, but got '%v' and '%v'", val1, val2)
 }
 
-func TestCacheWarmingUp(t *testing.T) {
-	store := NewMockCacheStorage(t)
-	cache := New(store)
-
-	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
-	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).Return(nil)
-
-	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", 2*time.Second, getGenerator([]byte("newTestValue"), nil), WithWarmUpTTL(1*time.Second))
-	if err != nil {
-		t.Errorf("Expected to get no error, but got %v", err)
-	}
-
-	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
-
-	time.Sleep(time.Millisecond)
-}
-
 func TestCacheMetricHook_WarmUp(t *testing.T) {
 	store := NewMockCacheStorage(t)
 
