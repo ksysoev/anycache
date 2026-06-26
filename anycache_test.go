@@ -232,10 +232,10 @@ func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T)
 		store := NewMockCacheStorage(t)
 		cache := New(store)
 
-		store.EXPECT().Get(mock.Anything, "ctx-cancel").Return(nil, ErrKeyNotExists)
-
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
+
+		store.EXPECT().Get(mock.Anything, "ctx-cancel").Maybe().Return(nil, context.Canceled)
 
 		result, err := cache.Cache(ctx, "ctx-cancel", time.Second, func(genCtx context.Context) ([]byte, error) {
 			<-genCtx.Done()

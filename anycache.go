@@ -111,6 +111,14 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		opt(&req)
 	}
 
+	req.ctx = ctx
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+
+		req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+		defer cancel()
+	}
+
 	state := CacheError
 	start := time.Now()
 
