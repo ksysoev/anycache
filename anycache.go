@@ -56,7 +56,7 @@ type Cache struct {
 	maxShiftTTL uint8
 }
 
-type CacheReuest struct {
+type Request struct {
 	MetricHook func(key string, op State, latency time.Duration)
 	TTL        time.Duration
 	WarmUpTTL  time.Duration
@@ -68,7 +68,7 @@ type (
 	CacheOptions    func(*Cache)
 )
 
-type CacheItemOptions func(*CacheReuest)
+type CacheItemOptions func(*Request)
 
 // New creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
@@ -100,7 +100,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		return nil, errors.New("ttl must be greater than zero")
 	}
 
-	req := CacheReuest{
+	req := Request{
 		TTL:        ttl,
 		MetricHook: c.observer,
 	}
