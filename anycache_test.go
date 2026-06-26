@@ -214,6 +214,7 @@ func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T)
 		result, err := cache.Cache(ctx, "ctx-deadline", time.Second, func(genCtx context.Context) ([]byte, error) {
 			close(generatorStarted)
 			<-genCtx.Done()
+
 			return nil, genCtx.Err()
 		})
 
@@ -262,6 +263,7 @@ func TestCache_WithTimeout_DecouplesWorkFromCallerContext(t *testing.T) {
 	store.EXPECT().Set(mock.Anything, "timeout-decouple", []byte("generated"), mock.Anything).RunAndReturn(func(setCtx context.Context, _ string, _ []byte, _ time.Duration) error {
 		assert.Nil(t, setCtx.Value(key), "expected internal context to be decoupled from caller values when WithTimeout is used")
 		close(setCalled)
+
 		return nil
 	}).Once()
 
@@ -273,6 +275,7 @@ func TestCache_WithTimeout_DecouplesWorkFromCallerContext(t *testing.T) {
 			assert.Nil(t, genCtx.Value(key), "expected generator context to be decoupled from caller values when WithTimeout is used")
 			close(generatorStarted)
 			<-releaseGenerator
+
 			return []byte("generated"), nil
 		}, WithTimeout(300*time.Millisecond))
 		errCh <- err
@@ -306,6 +309,7 @@ func TestCache_WithTimeout_SingleflightContinuesAfterInitiatorCancel(t *testing.
 	cache := New(store)
 
 	var generatorCalls atomic.Int32
+
 	generatorStarted := make(chan struct{})
 	releaseGenerator := make(chan struct{})
 
@@ -322,6 +326,7 @@ func TestCache_WithTimeout_SingleflightContinuesAfterInitiatorCancel(t *testing.
 			generatorCalls.Add(1)
 			close(generatorStarted)
 			<-releaseGenerator
+
 			return []byte("generated"), nil
 		}, WithTimeout(300*time.Millisecond))
 		initiatorErrCh <- err
@@ -336,6 +341,7 @@ func TestCache_WithTimeout_SingleflightContinuesAfterInitiatorCancel(t *testing.
 	go func() {
 		val, err := cache.Cache(t.Context(), "timeout-singleflight", time.Second, getGenerator([]byte("unused"), nil), WithTimeout(300*time.Millisecond))
 		waiterValCh <- val
+
 		waiterErrCh <- err
 	}()
 
