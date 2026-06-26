@@ -115,3 +115,9 @@ func TestWithMetricHook(t *testing.T) {
 	assert.Equal(t, CacheMiss, observedState)
 	assert.GreaterOrEqual(t, observedLatency, time.Duration(0))
 }
+
+func TestWithMetricHook_PanicsOnNilHook(t *testing.T) {
+	assert.PanicsWithValue(t, "metric hook cannot be nil", func() {
+		WithMetricHook(nil)
+	})
+}

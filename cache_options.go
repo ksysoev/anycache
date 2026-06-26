@@ -47,6 +47,10 @@ func WithBaseContext(ctx context.Context) func(*Cache) {
 
 // WithMetricHook sets a default hook function to be called for each cache operation, providing metrics such as operation type and latency.
 func WithMetricHook(hook func(key string, op State, latency time.Duration)) func(*Cache) {
+	if hook == nil {
+		panic("metric hook cannot be nil")
+	}
+
 	return func(c *Cache) {
 		c.observer = hook
 	}
