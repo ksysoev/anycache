@@ -21,8 +21,8 @@ func WithMetric(hook func(key string, op State, latency time.Duration)) CacheIte
 	}
 }
 
-// WithTimeout decouples cache request processing from incoming context,
-// that request cancelations will not affect concurent request waiting for same key to be generated.
+// WithTimeout decouples cache request processing from the incoming context so that
+// cancellations on the incoming request do not affect other callers waiting for the same key to be generated.
 // It sets a timeout for the cache request, after which the request will be canceled if not completed.
 func WithTimeout(timeout time.Duration) CacheItemOptions {
 	return func(req *Request) {
