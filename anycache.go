@@ -199,7 +199,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 				if req.Timeout > 0 {
 					var cancel context.CancelFunc
 
-					ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+					ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 					defer cancel()
 				}
 
