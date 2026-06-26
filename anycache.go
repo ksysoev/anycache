@@ -19,6 +19,20 @@ const (
 	HundredPercent = 100
 )
 
+type State string
+
+const (
+	CacheHit    State = "hit"
+	CacheMiss   State = "miss"
+	CacheWarmUp State = "warm_up"
+	CacheError  State = "error"
+)
+
+type result struct {
+	state State
+	data  []byte
+}
+
 var ErrKeyNotExists = errors.New("key does not exist")
 
 // CacheStorage
@@ -35,15 +49,17 @@ type Cache struct {
 	ctx         context.Context
 	sf          singleflight.Group
 	cancelCtx   context.CancelFunc
+	observer    func(key string, op State, latency time.Duration)
 	warmUpLocks sync.Map
 	keyPrefix   string
 	wg          sync.WaitGroup
 	maxShiftTTL uint8
 }
 
-type CacheReuest struct {
-	TTL       time.Duration
-	WarmUpTTL time.Duration
+type Request struct {
+	MetricHook func(key string, op State, latency time.Duration)
+	TTL        time.Duration
+	WarmUpTTL  time.Duration
 }
 
 type (
@@ -52,7 +68,7 @@ type (
 	CacheOptions    func(*Cache)
 )
 
-type CacheItemOptions func(*CacheReuest)
+type CacheItemOptions func(*Request)
 
 // New creates a new Cache instance with the provided CacheStorage and CacheOptions.
 // WithTTLRandomization sets max shift of TTL in persent
@@ -73,13 +89,6 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	return &c
 }
 
-// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
-	return func(req *CacheReuest) {
-		req.WarmUpTTL = ttl
-	}
-}
-
 // Cache caches the result of the generator function for the given key, for the specified TTL (time-to-live) duration.
 // If the key already exists in the cache, the cached value is returned.
 // Otherwise, the generator function is called to generate a new value,
@@ -91,25 +100,44 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		return nil, errors.New("ttl must be greater than zero")
 	}
 
-	req := CacheReuest{
-		TTL: ttl,
+	req := Request{
+		TTL:        ttl,
+		MetricHook: c.observer,
 	}
 
 	for _, opt := range opts {
 		opt(&req)
 	}
 
+	state := CacheError
+	start := time.Now()
+
+	if req.MetricHook != nil {
+		defer func(key string, start time.Time) {
+			defer func() {
+				if err := recover(); err != nil {
+					slog.Error("MetricHook panicked", "key", key, "error", err)
+				}
+			}()
+
+			req.MetricHook(key, state, time.Since(start))
+		}(key, start)
+	}
+
+	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
 	key = c.keyPrefix + key
 
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
 				err = fmt.Errorf("cache.Cache panicked: %v", r)
-				value = ""
+				value = nil
 			}
 		}()
 
 		var (
+			sfState            State
+			data               []byte
 			needWarmUp         bool
 			acquiredWarmUpLock bool
 			warmUpStarted      bool
@@ -127,21 +155,28 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
 			acquiredWarmUpLock = !warmUpLockBusy
 
-			value, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
+			data, ttl, err = c.Storage.GetWithTTL(c.ctx, key)
 
 			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 			if err == nil && readyForWarmUp {
 				needWarmUp = true
 			}
 		} else {
-			value, err = c.Storage.Get(c.ctx, key)
+			data, err = c.Storage.Get(c.ctx, key)
 		}
 
 		switch {
 		case errors.Is(err, ErrKeyNotExists):
-			value, err = c.generateAndSet(ctx, key, req.TTL, generator)
+			sfState = CacheMiss
+
+			data, err = c.generateAndSet(ctx, key, req.TTL, generator)
+			if err != nil {
+				return nil, err
+			}
 		case err != nil:
-			return "", err
+			return nil, err
+		default:
+			sfState = CacheHit
 		}
 
 		if needWarmUp && acquiredWarmUpLock {
@@ -155,9 +190,10 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			})
 
 			warmUpStarted = true
+			sfState = CacheWarmUp
 		}
 
-		return value, err
+		return &result{data: data, state: sfState}, err
 	})
 
 	select {
@@ -168,12 +204,14 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			return nil, resp.Err
 		}
 
-		val, ok := resp.Val.([]byte)
+		val, ok := resp.Val.(*result)
 		if !ok {
-			return nil, errors.New("unexpected value type returned from generator")
+			return nil, errors.New("unexpected value type returned from cache processing")
 		}
 
-		return val, nil
+		state = val.state
+
+		return val.data, nil
 	}
 }
 
