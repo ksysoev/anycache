@@ -313,8 +313,16 @@ func TestCache_WithTimeout_SingleflightContinuesAfterInitiatorCancel(t *testing.
 	generatorStarted := make(chan struct{})
 	releaseGenerator := make(chan struct{})
 
-	store.EXPECT().Get(mock.Anything, "timeout-singleflight").Return(nil, ErrKeyNotExists).Once()
-	store.EXPECT().Set(mock.Anything, "timeout-singleflight", []byte("generated"), mock.Anything).Return(nil).Once()
+	var getCalls atomic.Int32
+
+	store.EXPECT().Get(mock.Anything, "timeout-singleflight").RunAndReturn(func(_ context.Context, _ string) ([]byte, error) {
+		if getCalls.Add(1) == 1 {
+			return nil, ErrKeyNotExists
+		}
+
+		return []byte("generated"), nil
+	})
+	store.EXPECT().Set(mock.Anything, "timeout-singleflight", []byte("generated"), mock.Anything).Return(nil).Maybe()
 
 	initiatorCtx, cancelInitiator := context.WithCancel(context.Background())
 	initiatorErrCh := make(chan error, 1)
