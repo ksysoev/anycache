@@ -106,13 +106,13 @@ Metric states: `hit`, `miss`, `warm_up`, `error`.
 
 ## Storage backends
 
-Included backends in this repository:
+Backends in this repository:
 
 - `storage/redis`
 - `storage/inmemory`
 - `storage/layered`
-
-Additional implementations: `storage/memcache`, `storage/badger`.
+- `storage/memcache`
+- `storage/badger`
 
 ## Additional examples
 
