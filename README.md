@@ -27,8 +27,10 @@ func main() {
 	ctx := context.Background()
 
 	rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+	defer func() { _ = rdb.Close() }()
+
 	cache := anycache.New(redisstorage.New(rdb))
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 
 	data, err := cache.Cache(ctx, "user:42", 5*time.Minute, func(context.Context) ([]byte, error) {
 		return []byte("cached value"), nil
@@ -54,6 +56,10 @@ func main() {
 name, err := cache.CacheS(ctx, "user:name", time.Minute, func(context.Context) (string, error) {
 	return "alice", nil
 })
+if err != nil {
+	panic(err)
+}
+_ = name
 
 // CacheStruct
 type Profile struct {
@@ -62,12 +68,16 @@ type Profile struct {
 }
 
 var p Profile
-err = cache.CacheStruct(ctx, "user:profile", 5*time.Minute, func(context.Context) (any, error) {
+if err := cache.CacheStruct(ctx, "user:profile", 5*time.Minute, func(context.Context) (any, error) {
 	return Profile{ID: 42, Name: "Alice"}, nil
-}, &p)
+}, &p); err != nil {
+	panic(err)
+}
 
 // Invalidate
-err = cache.Invalidate(ctx, "user:profile")
+if err := cache.Invalidate(ctx, "user:profile"); err != nil {
+	panic(err)
+}
 ```
 
 ## Behavior & options
@@ -109,30 +119,39 @@ Additional implementations: `storage/memcache`, `storage/badger`.
 ### InMemory
 
 ```go
+ctx := context.Background()
+
 store, err := inmemory.New(10_000)
 if err != nil {
 	panic(err)
 }
-defer store.Close()
+defer func() { _ = store.Close() }()
 
 cache := anycache.New(store)
-defer cache.Close()
+defer func() { _ = cache.Close() }()
 
 v, err := cache.CacheS(ctx, "greeting", time.Minute, func(context.Context) (string, error) {
 	return "hello", nil
 })
+if err != nil {
+	panic(err)
+}
 _ = v
 ```
 
 ### Layered
 
 ```go
+ctx := context.Background()
+
 l1, err := inmemory.New(5_000)
 if err != nil {
 	panic(err)
 }
+defer func() { _ = l1.Close() }()
 
 rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
+defer func() { _ = rdb.Close() }()
 l2 := redisstorage.New(rdb)
 
 store, err := layered.New(l1, l2)
@@ -141,11 +160,13 @@ if err != nil {
 }
 
 cache := anycache.New(store)
-defer cache.Close()
+defer func() { _ = cache.Close() }()
 
-_, err = cache.Cache(ctx, "user:42", 5*time.Minute, func(context.Context) ([]byte, error) {
+if _, err := cache.Cache(ctx, "user:42", 5*time.Minute, func(context.Context) ([]byte, error) {
 	return []byte("value"), nil
-})
+}); err != nil {
+	panic(err)
+}
 ```
 
 When a value is found in a lower layer, `storage/layered` back-populates upper layers for faster subsequent reads.
