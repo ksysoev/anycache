@@ -1,4 +1,11 @@
-# anycache
+# AnyCache
+
+[![tests](https://github.com/ksysoev/anycache/actions/workflows/main.yml/badge.svg)](https://github.com/ksysoev/anycache/actions/workflows/main.yml)
+[![codecov](https://codecov.io/gh/ksysoev/anycache/branch/main/graph/badge.svg?token=J7936BN4R2)](https://codecov.io/gh/ksysoev/anycache)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ksysoev/anycache)](https://goreportcard.com/report/github.com/ksysoev/anycache)
+[![Go Reference](https://pkg.go.dev/badge/github.com/ksysoev/anycache.svg)](https://pkg.go.dev/github.com/ksysoev/anycache)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 
 `anycache` is a lazy caching library for Go with pluggable storage backends. It helps reduce repeated expensive work, supports cache stampede mitigation, and can warm up entries before expiration.
 
