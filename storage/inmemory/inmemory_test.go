@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
@@ -328,13 +329,10 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 				t.Helper()
 
 				s, err := New(10)
-				if err != nil {
-					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
-				}
+				require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
 
-				if err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond); err != nil {
-					t.Fatalf("Failed to set key1: %v", err)
-				}
+				err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond)
+				require.NoError(t, err, "Failed to set key1: %v", err)
 
 				return s
 			},
@@ -349,13 +347,10 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 				t.Helper()
 
 				s, err := New(10)
-				if err != nil {
-					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
-				}
+				require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
 
-				if err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond); err != nil {
-					t.Fatalf("Failed to set key1: %v", err)
-				}
+				err = s.Set(t.Context(), "key1", []byte("value1"), time.Millisecond)
+				require.NoError(t, err, "Failed to set key1: %v", err)
 
 				return s
 			},
@@ -370,13 +365,10 @@ func TestInMemoryCacheStorage_GetWithTTL(t *testing.T) {
 				t.Helper()
 
 				s, err := New(10)
-				if err != nil {
-					t.Fatalf("Failed to create InMemoryCacheStorage: %v", err)
-				}
+				require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
 
-				if err = s.Set(t.Context(), "key2", []byte("value2"), time.Millisecond); err != nil {
-					t.Fatalf("Failed to set key2: %v", err)
-				}
+				err = s.Set(t.Context(), "key2", []byte("value2"), time.Millisecond)
+				require.NoError(t, err, "Failed to set key2: %v", err)
 
 				time.Sleep(2 * time.Millisecond)
 

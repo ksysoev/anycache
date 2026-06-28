@@ -131,90 +131,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
 	key = c.keyPrefix + key
 
-	res := c.sf.DoChan(key, func() (value any, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("cache.Cache panicked: %v", r)
-				value = nil
-			}
-		}()
-
-		if req.Timeout > 0 {
-			var cancel context.CancelFunc
-
-			req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
-			defer cancel()
-		}
-
-		var (
-			sfState            State
-			data               []byte
-			needWarmUp         bool
-			acquiredWarmUpLock bool
-			warmUpStarted      bool
-		)
-
-		defer func() {
-			if acquiredWarmUpLock && !warmUpStarted {
-				c.warmUpLocks.Delete(key)
-			}
-		}()
-
-		if req.WarmUpTTL > 0 {
-			var ttl time.Duration
-
-			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
-			acquiredWarmUpLock = !warmUpLockBusy
-
-			data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
-
-			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
-			if err == nil && readyForWarmUp {
-				needWarmUp = true
-			}
-		} else {
-			data, err = c.Storage.Get(req.ctx, key)
-		}
-
-		switch {
-		case errors.Is(err, ErrKeyNotExists):
-			sfState = CacheMiss
-
-			data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
-			if err != nil {
-				return nil, err
-			}
-		case err != nil:
-			return nil, err
-		default:
-			sfState = CacheHit
-		}
-
-		if needWarmUp && acquiredWarmUpLock {
-			c.wg.Go(func() {
-				defer c.warmUpLocks.Delete(key)
-
-				ctx := c.ctx
-
-				if req.Timeout > 0 {
-					var cancel context.CancelFunc
-
-					ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-					defer cancel()
-				}
-
-				_, err := c.generateAndSet(ctx, key, req.TTL, generator)
-				if err != nil {
-					slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
-				}
-			})
-
-			warmUpStarted = true
-			sfState = CacheWarmUp
-		}
-
-		return &result{data: data, state: sfState}, err
-	})
+	res := c.processRequest(key, generator, req)
 
 	select {
 	case <-ctx.Done():
@@ -344,4 +261,95 @@ func (c *Cache) Close() error {
 	c.wg.Wait()
 
 	return nil
+}
+
+func (c *Cache) processRequest(key string, generator CacheGenerator, req Request) <-chan singleflight.Result {
+	return c.sf.DoChan(key, func() (value any, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("cache.Cache panicked: %v", r)
+				value = nil
+			}
+		}()
+
+		if req.Timeout > 0 {
+			var cancel context.CancelFunc
+
+			req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+			defer cancel()
+		}
+
+		var (
+			sfState            State
+			data               []byte
+			needWarmUp         bool
+			acquiredWarmUpLock bool
+			warmUpStarted      bool
+		)
+
+		defer func() {
+			if acquiredWarmUpLock && !warmUpStarted {
+				c.warmUpLocks.Delete(key)
+			}
+		}()
+
+		if req.WarmUpTTL > 0 {
+			var ttl time.Duration
+
+			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
+			acquiredWarmUpLock = !warmUpLockBusy
+
+			data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
+
+			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
+			if err == nil && readyForWarmUp {
+				needWarmUp = true
+			}
+		} else {
+			data, err = c.Storage.Get(req.ctx, key)
+		}
+
+		switch {
+		case errors.Is(err, ErrKeyNotExists):
+			sfState = CacheMiss
+
+			data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
+			if err != nil {
+				return nil, err
+			}
+		case err != nil:
+			return nil, err
+		default:
+			sfState = CacheHit
+		}
+
+		if needWarmUp && acquiredWarmUpLock {
+			c.startWarmUp(key, generator, req)
+
+			warmUpStarted = true
+			sfState = CacheWarmUp
+		}
+
+		return &result{data: data, state: sfState}, err
+	})
+}
+
+func (c *Cache) startWarmUp(key string, generator CacheGenerator, req Request) {
+	c.wg.Go(func() {
+		defer c.warmUpLocks.Delete(key)
+
+		ctx := c.ctx
+
+		if req.Timeout > 0 {
+			var cancel context.CancelFunc
+
+			ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+			defer cancel()
+		}
+
+		_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+		if err != nil {
+			slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
+		}
+	})
 }
