@@ -82,7 +82,12 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 
 	if len(s.index) >= s.limit {
 		leastUsed := s.items.Front()
-		item, _ := leastUsed.Value.(*cacheItem)
+
+		item, ok := leastUsed.Value.(*cacheItem)
+		if !ok {
+			return errors.New("failed to retrieve least recently used item, invalid type assertion")
+		}
+
 		s.delete(item)
 	}
 
@@ -99,14 +104,10 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 		expiry: expiry,
 	}
 
-	elem := &list.Element{
-		Value: item,
-	}
+	elem := s.items.PushBack(item)
 
 	item.lruPos = elem
-
 	s.index[key] = item
-	s.items.PushBack(elem)
 	s.expiryQ.Push(item)
 
 	return nil
