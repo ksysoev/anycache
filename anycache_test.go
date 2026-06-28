@@ -514,3 +514,66 @@ func TestCache_Invalidate(t *testing.T) {
 		})
 	}
 }
+
+func TestCache_GeneratorPanicRecovered(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "panic-recovery").Return(nil, ErrKeyNotExists).Once()
+
+	result, err := cache.Cache(t.Context(), "panic-recovery", time.Second, func(_ context.Context) ([]byte, error) {
+		panic("boom")
+	})
+
+	assert.Nil(t, result)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "cache.Cache panicked")
+}
+
+func TestCache_WarmUpLockReleasedWhenWarmUpNotNeeded(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().GetWithTTL(mock.Anything, "warmup-lock-release").Return([]byte("cached"), 5*time.Second, nil).Once()
+
+	result, err := cache.Cache(t.Context(), "warmup-lock-release", 10*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("cached"), result)
+
+	_, exists := cache.warmUpLocks.Load("warmup-lock-release")
+	assert.False(t, exists, "warm up lock should be released when warm up is not started")
+}
+
+func TestCache_WarmUpHonorsTimeout(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().GetWithTTL(mock.Anything, "warmup-timeout").Return([]byte("cached"), 200*time.Millisecond, nil).Once()
+	store.EXPECT().Set(mock.Anything, "warmup-timeout", []byte("fresh"), mock.Anything).RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ time.Duration) error {
+		_, ok := ctx.Deadline()
+		assert.True(t, ok, "expected warm up context with deadline")
+
+		return nil
+	}).Once()
+
+	result, err := cache.Cache(t.Context(), "warmup-timeout", 3*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second), WithTimeout(50*time.Millisecond))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("cached"), result)
+	assert.NoError(t, cache.Close())
+}
+
+func TestCache_WarmUpSetErrorIsHandled(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().GetWithTTL(mock.Anything, "warmup-set-error").Return([]byte("cached"), 200*time.Millisecond, nil).Once()
+	store.EXPECT().Set(mock.Anything, "warmup-set-error", []byte("fresh"), mock.Anything).Return(assert.AnError).Once()
+
+	result, err := cache.Cache(t.Context(), "warmup-set-error", 2*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second))
+
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("cached"), result)
+	assert.NoError(t, cache.Close())
+}
