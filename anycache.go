@@ -263,6 +263,7 @@ func (c *Cache) Close() error {
 	return nil
 }
 
+// processRequest processes a cache request for the given key using the provided generator function and request options.
 func (c *Cache) processRequest(key string, generator CacheGenerator, req Request) <-chan singleflight.Result {
 	return c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
@@ -334,6 +335,8 @@ func (c *Cache) processRequest(key string, generator CacheGenerator, req Request
 	})
 }
 
+// startWarmUp starts a background goroutine to warm up the cache for the given key
+// using the provided generator function and request options.
 func (c *Cache) startWarmUp(key string, generator CacheGenerator, req Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
