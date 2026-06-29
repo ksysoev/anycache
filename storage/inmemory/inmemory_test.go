@@ -481,7 +481,7 @@ func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 	t.Cleanup(func() { _ = s.Close() })
 
 	for i := 1; i <= 3; i++ {
-		err := s.Set(t.Context(), fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("value%d", i)), time.Second)
+		err := s.Set(t.Context(), fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("value%d", i)), time.Minute)
 		require.NoError(t, err, "Failed to set key%d: %v", i, err)
 	}
 
@@ -490,7 +490,7 @@ func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 	assert.Equal(t, 3, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
 
 	for i := 1; i <= 6; i++ {
-		err := s.Set(t.Context(), fmt.Sprintf("newKey%d", i), []byte(fmt.Sprintf("newValue%d", i)), time.Second)
+		err := s.Set(t.Context(), fmt.Sprintf("newKey%d", i), []byte(fmt.Sprintf("newValue%d", i)), time.Minute)
 		require.NoError(t, err, "Failed to set newKey%d: %v", i, err)
 	}
 
