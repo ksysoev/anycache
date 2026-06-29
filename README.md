@@ -162,6 +162,67 @@ Backends in this repository:
 - `storage/memcache`
 - `storage/badger`
 
+### Backend comparison
+
+| Backend | TTL support | Persistence | Local vs distributed | Interoperability notes | Known tradeoffs |
+| --- | --- | --- | --- | --- | --- |
+| `inmemory` | Yes. `ttl < 0` is rejected, `ttl = 0` means no expiration, positive TTL expires by wall clock. | No (process memory only). | Local to one process. | Stores raw `[]byte` values in-process. | Capacity-bound LRU eviction; data is lost on process restart. |
+| `redis` | Yes. Positive TTL uses Redis expiration; `ttl <= 0` stores without expiration. | Deployment-dependent (configured in Redis, not enforced by this backend). | Distributed/shared if multiple services use the same Redis. | Uses regular Redis GET/SET bytes; straightforward for non-anycache Redis clients. | Adds network hop; availability/latency depend on Redis. |
+| `memcache` | Yes, with limits: max 30 days; positive TTL must be at least 1 second after truncation; `ttl <= 0` means no expiration. | Typically non-persistent (deployment-dependent). | Distributed/shared if multiple services use the same Memcached cluster. | Values are stored as protobuf `CachedItem` envelope (not raw user bytes). | Not wire-compatible with raw-value memcached readers/writers without protobuf decoding/encoding. |
+| `badger` | Yes. Positive TTL stored in Badger; `ttl <= 0` means no expiration. | Yes (embedded on-disk store). | Local to the node/process using that DB path. | Local embedded KV (no cross-service sharing by default). | Best for single-node persistence; not a distributed cache by itself. |
+| `layered` | Depends on underlying stores and propagated TTL from the layer that returned the hit. | Depends on underlying stores. | Can combine local (L1) and distributed/persistent (L2+). | Semantics include read-through back-population into upper layers. | Sequential non-atomic multi-layer operations can partially apply on errors. |
+
+### When to choose each backend
+
+- Choose **`inmemory`** for fastest process-local caching and when restart data loss is acceptable.
+- Choose **`redis`** for shared cache state across instances with standard Redis interoperability.
+- Choose **`memcache`** when you need Memcached infrastructure and accept protobuf-wrapped value format + TTL limits.
+- Choose **`badger`** for single-node persistent local caching without external services.
+- Choose **`layered`** when you want an L1+L2 strategy (for example in-memory + Redis) and can tolerate best-effort, non-atomic cross-layer behavior.
+
+### Memcache backend caveats
+
+`storage/memcache` does **not** store raw user bytes directly. On every `Set`, it serializes values as protobuf `CachedItem`:
+
+- `value` (original payload)
+- `expires_at_unix` (absolute expiration timestamp)
+
+This wrapper is required so `GetWithTTL` can reconstruct remaining TTL from stored absolute expiry.
+
+Interoperability impact:
+
+- Non-anycache memcached readers will see protobuf bytes, not the original raw payload.
+- Non-anycache writers that store raw bytes will not match this backend's decode path.
+
+TTL behavior implemented by this backend:
+
+- `ttl > 30 days` is rejected.
+- Positive TTL that truncates below 1 second is rejected.
+- `ttl <= 0` means no expiration.
+
+### Layered backend semantics and failures
+
+`storage/layered` executes operations in layer order and does not provide cross-layer transactions.
+
+`GetWithTTL` flow:
+
+- Reads each layer from top to bottom.
+- If a layer returns `ErrKeyNotExists`, it continues to the next layer.
+- If a layer returns any other error, it fails immediately.
+- On a lower-layer hit, it back-populates all upper layers using `Set` and the returned TTL.
+- If any back-population `Set` fails, `GetWithTTL` returns that error (even though a lower layer had the value).
+
+Write/delete flow:
+
+- `Set` writes sequentially to each layer and returns on first error.
+- `Del` deletes sequentially from each layer and returns on first error.
+- Because writes/deletes are sequential, earlier layers may already be modified when a later layer fails (partial application).
+
+Consistency expectation:
+
+- Layer alignment is best effort over time.
+- Temporary divergence between layers is possible during failures or partial updates.
+
 ## Additional examples
 
 For runnable onboarding examples, see:

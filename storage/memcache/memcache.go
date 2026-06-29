@@ -16,6 +16,21 @@ const (
 	maxTTL = 30 * 24 * time.Hour // 30 days, the maximum TTL supported by Memcached
 )
 
+// Storage implements anycache.CacheStorage on top of Memcached.
+//
+// Value format caveat:
+//   - Values are always stored as protobuf CachedItem envelopes, not raw user bytes.
+//   - Envelope fields: payload bytes + absolute expiry timestamp (expires_at_unix).
+//   - This format is required so GetWithTTL can reconstruct remaining TTL.
+//
+// Interoperability caveat:
+//   - External memcached readers/writers must use the same protobuf format.
+//   - Raw-byte clients will not be wire-compatible with this backend by default.
+//
+// TTL caveat:
+//   - ttl > 30 days is rejected.
+//   - Positive ttl that truncates below 1 second is rejected.
+//   - ttl <= 0 means no expiration.
 type Storage struct {
 	memcache MemCached
 }
@@ -42,7 +57,15 @@ func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
 }
 
 // Set stores value under key with an optional TTL.
-// ttl <= 0 means the item never expires.
+//
+// The stored memcached payload is protobuf CachedItem, not raw value bytes,
+// because absolute expiry is persisted for TTL reconstruction in GetWithTTL.
+//
+// TTL constraints:
+//   - ttl > 30 days returns an error.
+//   - ttl > 0 is truncated to whole seconds for memcached expiration.
+//   - if truncated ttl is < 1 second, Set returns an error.
+//   - ttl <= 0 means no expiration.
 func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
 	if ttl > maxTTL {
 		return errors.New("ttl value is too large for memcache. Maximum allowed is 30 days")
@@ -75,6 +98,9 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 }
 
 // GetWithTTL retrieves both the value and its remaining TTL in one call.
+//
+// Remaining TTL is reconstructed from the protobuf CachedItem.expires_at_unix
+// field written at Set time. When expires_at_unix == 0, the key has no TTL.
 func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
 	raw, err := s.memcache.Get(key)
 
@@ -99,8 +125,8 @@ func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Durati
 	remaining := time.Until(expiresAt)
 
 	if remaining <= 0 {
-		// we trust that memcache will not return expired items
-		// but incase app servers got incorrect time then we just return 0 TTl and let memcache expire the item on next access
+		// We expect memcache not to return expired items.
+		// If server clocks are skewed, return zero TTL and let memcache expire on next access.
 		return item.Value, 0, nil
 	}
 
@@ -117,7 +143,7 @@ func (s *Storage) Del(_ context.Context, key string) error {
 	return err
 }
 
-// encode serialises value + optional expiry into a protobuf CachedItem.
+// encode serializes value + optional absolute expiry into protobuf CachedItem.
 // expiresAt zero means no TTL.
 func encode(value []byte, expiresAt time.Time) ([]byte, error) {
 	item := &pb.CachedItem{Value: value}
@@ -128,7 +154,7 @@ func encode(value []byte, expiresAt time.Time) ([]byte, error) {
 	return proto.Marshal(item)
 }
 
-// decode deserialises a protobuf CachedItem from raw bytes.
+// decode deserializes a protobuf CachedItem from raw bytes.
 func decode(raw []byte) (*pb.CachedItem, error) {
 	item := &pb.CachedItem{}
 	if err := proto.Unmarshal(raw, item); err != nil {
