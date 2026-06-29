@@ -111,7 +111,7 @@ func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Du
 	s.index[key] = item
 
 	if item.expiry != nil {
-		s.expiryQ.Push(item)
+		heap.Push(&s.expiryQ, item)
 	}
 
 	return nil
