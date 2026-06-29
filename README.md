@@ -162,16 +162,6 @@ Backends in this repository:
 - `storage/memcache`
 - `storage/badger`
 
-### Backend comparison
-
-| Backend | TTL support | Persistence | Local vs distributed | Interoperability notes | Known tradeoffs |
-| --- | --- | --- | --- | --- | --- |
-| `inmemory` | Yes. `ttl < 0` is rejected, `ttl = 0` means no expiration, positive TTL expires by wall clock. | No (process memory only). | Local to one process. | Stores raw `[]byte` values in-process. | Capacity-bound LRU eviction; data is lost on process restart. |
-| `redis` | Yes. Positive TTL uses Redis expiration; `ttl <= 0` stores without expiration. | Deployment-dependent (configured in Redis, not enforced by this backend). | Distributed/shared if multiple services use the same Redis. | Uses regular Redis GET/SET bytes; straightforward for non-anycache Redis clients. | Adds network hop; availability/latency depend on Redis. |
-| `memcache` | Yes, with limits: max 30 days; positive TTL must be at least 1 second after truncation; `ttl <= 0` means no expiration. | Typically non-persistent (deployment-dependent). | Distributed/shared if multiple services use the same Memcached cluster. | Values are stored as protobuf `CachedItem` envelope (not raw user bytes). | Not wire-compatible with raw-value memcached readers/writers without protobuf decoding/encoding. |
-| `badger` | Yes. Positive TTL stored in Badger; `ttl <= 0` means no expiration. | Yes (embedded on-disk store). | Local to the node/process using that DB path. | Local embedded KV (no cross-service sharing by default). | Best for single-node persistence; not a distributed cache by itself. |
-| `layered` | Depends on underlying stores and propagated TTL from the layer that returned the hit. | Depends on underlying stores. | Can combine local (L1) and distributed/persistent (L2+). | Semantics include read-through back-population into upper layers. | Sequential non-atomic multi-layer operations can partially apply on errors. |
-
 ### When to choose each backend
 
 - Choose **`inmemory`** for fastest process-local caching and when restart data loss is acceptable.
