@@ -497,7 +497,22 @@ func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3 after eviction, but got %d", s.items.Len())
 	assert.Equal(t, 3, len(s.index), "Expected index size to be 3 after eviction, but got %d", len(s.index))
 	assert.Equal(t, 3, len(s.expiryQ), "Expected expiry queue size to be 3 after eviction, but got %d", len(s.expiryQ))
-}
+
+	for i := 1; i <= 3; i++ {
+		_, err := s.Get(t.Context(), fmt.Sprintf("key%d", i))
+		assert.Error(t, err, "Expected key%d to be evicted, but it was still present", i)
+	}
+
+	for i := 1; i <= 3; i++ {
+		_, err := s.Get(t.Context(), fmt.Sprintf("newKey%d", i))
+		assert.Error(t, err, "Expected newKey%d to be evicted, but it was still present", i)
+	}
+
+	for i := 4; i <= 6; i++ {
+		got, err := s.Get(t.Context(), fmt.Sprintf("newKey%d", i))
+		assert.NoError(t, err, "Expected newKey%d to remain in cache, but got error: %v", i, err)
+		assert.Equal(t, fmt.Sprintf("newValue%d", i), string(got), "Expected newKey%d to have correct value", i)
+	}
 
 func TestInMemory_LRUEviction_AccessOrder(t *testing.T) {
 	s, err := New(3)
