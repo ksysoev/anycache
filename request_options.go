@@ -2,7 +2,7 @@ package anycache
 
 import "time"
 
-// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
+// WithWarmUpTTL sets the TTL threshold that triggers asynchronous warm-up refresh.
 func WithWarmUpTTL(ttl time.Duration) CacheItemOptions {
 	return func(req *Request) {
 		req.WarmUpTTL = ttl

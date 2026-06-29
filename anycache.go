@@ -1,5 +1,4 @@
-// Package anycache provide laze caching with posibility to use diffent cache
-// storages
+// Package anycache provides lazy cache-aside helpers with pluggable storage backends.
 package anycache
 
 import (
@@ -35,7 +34,7 @@ type result struct {
 
 var ErrKeyNotExists = errors.New("key does not exist")
 
-// CacheStorage
+// CacheStorage defines the backend contract used by Cache.
 type CacheStorage interface {
 	Get(context.Context, string) ([]byte, error)
 	Set(context.Context, string, []byte, time.Duration) error
@@ -43,7 +42,7 @@ type CacheStorage interface {
 	GetWithTTL(context.Context, string) ([]byte, time.Duration, error)
 }
 
-// Cache
+// Cache provides cache-aside operations on top of a CacheStorage backend.
 type Cache struct {
 	Storage     CacheStorage
 	ctx         context.Context
@@ -72,9 +71,7 @@ type (
 
 type CacheItemOptions func(*Request)
 
-// New creates a new Cache instance with the provided CacheStorage and CacheOptions.
-// WithTTLRandomization sets max shift of TTL in persent
-// It returns the created Cache instance.
+// New creates a Cache with the provided storage backend and options.
 func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	ctx, cancelCtx := context.WithCancel(context.Background())
 
@@ -91,12 +88,11 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 	return &c
 }
 
-// Cache caches the result of the generator function for the given key, for the specified TTL (time-to-live) duration.
-// If the key already exists in the cache, the cached value is returned.
-// Otherwise, the generator function is called to generate a new value,
-// which is then cached and returned.
-// The function takes an optional list of CacheItemOptions to customize the caching behavior.
-// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
+// Cache returns the cached value for key or generates and stores it on miss.
+//
+// ttl must be greater than zero.
+// opts can customize request behavior (for example warm-up, timeout,
+// or per-request metrics).
 func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator, opts ...CacheItemOptions) ([]byte, error) {
 	if ttl <= 0 {
 		return nil, errors.New("ttl must be greater than zero")
@@ -171,14 +167,10 @@ func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, gener
 	return string(val), nil
 }
 
-// CacheStruct caches the result of a function that returns a struct.
-// The key is used to identify the cached value.
-// The generator function is called to generate the value if it is not already cached.
-// The result parameter is a pointer to the struct that will be populated with the cached value.
-// The opts parameter is optional and can be used to set additional cache item options.
-// The ttl parameter must be greater than zero and controls the cache expiration.
-// WithWarmUpTTL sets TTL threshold for cache item to be warmed up
-// Returns an error if there was a problem caching or unmarshalling the value.
+// CacheStruct caches a generated value as JSON and unmarshals it into result.
+//
+// result must be a pointer that can be unmarshaled into.
+// ttl must be greater than zero.
 func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
 	generatorWrapper := func(ctx context.Context) ([]byte, error) {
 		val, err := generator(ctx)
@@ -204,9 +196,7 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, 
 	return err
 }
 
-// Invalidate removes the cached value for the given key from the cache storage.
-// accepts a context and the key to be invalidated.
-// returns an error if there was a problem invalidating the cache for the key.
+// Invalidate removes key from the underlying cache storage.
 func (c *Cache) Invalidate(ctx context.Context, key string) error {
 	key = c.keyPrefix + key
 
@@ -253,8 +243,7 @@ func randomizeTTL(maxShiftTTL uint8, ttl time.Duration) time.Duration {
 	return time.Duration(randomizedTTL)
 }
 
-// Close closes the Cache instance.
-// It returns an error if any occurred.
+// Close cancels background work and waits for warm-up goroutines to finish.
 func (c *Cache) Close() error {
 	// cancel background requests
 	c.cancelCtx()

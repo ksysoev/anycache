@@ -6,8 +6,21 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/ksysoev/anycache.svg)](https://pkg.go.dev/github.com/ksysoev/anycache)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
+`anycache` is a Go cache-aside helper that wraps expensive reads with a consistent API across storage backends.
 
-`anycache` is a lazy caching library for Go with pluggable storage backends. It helps reduce repeated expensive work, supports cache stampede mitigation, and can warm up entries before expiration.
+It is built for teams that want to add caching quickly without reimplementing stampede protection, refresh-on-near-expiry behavior, and cache lifecycle wiring in every service.
+
+### Why use anycache
+
+- Reduce repeated backend work with lazy, on-demand caching.
+- Deduplicate concurrent misses for the same key.
+- Keep hot keys fresh with optional warm-up before TTL expiry.
+- Switch storage backends (Redis, in-memory, layered, and more) without changing calling code.
+
+### Who it is for
+
+- Go services that use cache-aside patterns around DB/API calls.
+- Teams that want a small, explicit caching abstraction instead of custom one-off wrappers.
 
 ## Installation
 
@@ -106,10 +119,38 @@ Metric states: `hit`, `miss`, `warm_up`, `error`.
 
 ## Important semantics
 
-- Concurrent same-key requests are deduplicated (singleflight-style).
-- `WithWarmUpTTL` checks remaining TTL, returns the current cached value immediately, then refreshes asynchronously.
-- `WithTimeout` runs internal storage/generator work on the cache base context (`WithBaseContext` or default), so caller context values/cancellation are not directly propagated into internal work.
-- `Close()` should be called to cancel background work and wait for warm-up goroutines to finish.
+- **Singleflight dedupe scope:** concurrent requests for the same key are deduplicated within a single `anycache.Cache` instance.
+- **Warm-up behavior (`WithWarmUpTTL`):** when a key exists and its remaining TTL is `> 0` and `<= warmUpTTL`, anycache returns the current cached value immediately and schedules a background refresh.
+- **Warm-up lock semantics:** only one warm-up refresh per key is started at a time; concurrent requests do not start duplicate warm-up goroutines.
+- **Timeout and base context (`WithTimeout` + `WithBaseContext`):** internal storage and generator work runs on the cache base context (default or `WithBaseContext`). With `WithTimeout`, a timeout is applied to that base context for internal work.
+- **Caller cancellation expectations:** because internal work uses the cache base context, caller context values/cancellation are not directly propagated into internal storage/generator execution.
+- **Lifecycle (`Close`):** call `Close()` during shutdown to cancel background work and wait for in-flight warm-up goroutines to finish.
+
+## When to use anycache
+
+Use anycache when you want:
+
+- A consistent cache-aside API for expensive reads in Go services.
+- Built-in same-key deduplication to reduce thundering-herd/stampede pressure.
+- Optional warm-up refresh behavior without writing custom background orchestration.
+- Flexibility to move between in-memory, Redis, layered, or other supported backends.
+
+## When not to use it
+
+anycache may be a poor fit when:
+
+- You need backend-specific features directly (for example advanced Redis primitives) as part of core logic.
+- Your use case is very small and a direct one-off cache-aside wrapper is simpler to maintain.
+- You require highly custom invalidation/orchestration rules that sit outside this abstraction.
+
+## Alternatives
+
+- **Direct backend client:** maximum control, but you manage dedupe, warm-up, and consistency details yourself.
+- **Hand-rolled cache-aside wrapper:** can work for narrow use cases, but tends to duplicate behavior across services over time.
+
+## Release notes
+
+See [GitHub Releases](https://github.com/ksysoev/anycache/releases) for release notes and version-to-version changes. Tags are available at [GitHub Tags](https://github.com/ksysoev/anycache/tags).
 
 ## Storage backends
 
@@ -122,6 +163,11 @@ Backends in this repository:
 - `storage/badger`
 
 ## Additional examples
+
+For runnable onboarding examples, see:
+
+- [`anycache_example_test.go`](./anycache_example_test.go) in this repository
+- pkg.go.dev examples: <https://pkg.go.dev/github.com/ksysoev/anycache>
 
 ### InMemory
 
