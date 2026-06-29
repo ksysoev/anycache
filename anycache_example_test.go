@@ -88,6 +88,7 @@ func ExampleCache_CacheStruct() {
 	defer func() { _ = cache.Close() }()
 
 	var p profile
+
 	err = cache.CacheStruct(ctx, "user:1", time.Minute, func(context.Context) (any, error) {
 		return profile{ID: 1, Name: "Alice"}, nil
 	}, &p)
@@ -172,6 +173,7 @@ func Example_storageRedis_setup() {
 	defer func() { _ = rdb.Close() }()
 
 	store := redisstorage.New(rdb)
+
 	cache := anycache.New(store)
 	defer func() { _ = cache.Close() }()
 
