@@ -226,8 +226,12 @@ func (s *Storage) checkCtx(ctx context.Context) error {
 		return errors.New("storage is closed")
 	}
 
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if ctx == nil {
+		return nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	return nil
