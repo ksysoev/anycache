@@ -1,10 +1,16 @@
 package layered
 
-// Layered cache storage allows using multiple cache storages in a layered manner.
-// This is useful when you want a fast in-memory cache as the first layer and a slower but more persistent cache
-// (like Redis or Memcached) as the second layer.
-// Although layered cache supports any number of stores, it's recommended to use no more than two layers
-// (1st: in-memory, 2nd: distributed) for performance reasons.
+// Layered cache storage composes multiple backends as ordered layers.
+//
+// Typical setup: fast local L1 (in-memory) + shared slower L2 (Redis/Memcached).
+//
+// Semantics caveat:
+//   - Operations are sequential across layers, not transactional.
+//   - Set/Del can partially apply (earlier layers may succeed before later-layer error).
+//   - Reads may succeed in a lower layer but still return error if back-population fails.
+//
+// Consistency model is best effort eventual alignment between layers.
+// Temporary divergence is possible during failures.
 
 import (
 	"context"
@@ -19,6 +25,7 @@ const (
 	minNumberOfStorages = 2
 )
 
+// Storage accesses layers from index 0 (top/fastest) to the last (lowest tier).
 type Storage struct {
 	stores []anycache.CacheStorage
 }
@@ -40,16 +47,19 @@ func New(stores ...anycache.CacheStorage) (*Storage, error) {
 	return &Storage{stores: stores}, nil
 }
 
-// Get retrieves the value associated with the provided key from the layered cache storage.
-// if the key is found in a lower layer, it will be set in all upper layers to optimize future access.
+// Get retrieves the value associated with key from layered cache storage.
+// If the key is found in a lower layer, upper layers are back-populated via GetWithTTL.
 func (s *Storage) Get(ctx context.Context, key string) ([]byte, error) {
-	// unfortunately to populate upper layers of cache we need to get TTL of the key, so we need to use GetWithTTL method
+	// Back-population requires the key TTL, so Get delegates to GetWithTTL.
 	val, _, err := s.GetWithTTL(ctx, key)
 
 	return val, err
 }
 
-// Set stores a value associated with the provided key in all layers of the cache storage.
+// Set writes key/value/ttl to layers in order (0..N-1).
+//
+// This operation is non-atomic across layers: on first error it returns immediately,
+// and previously written layers are not rolled back.
 func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
 	for i, store := range s.stores {
 		err := store.Set(ctx, key, value, ttl)
@@ -61,9 +71,16 @@ func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Du
 	return nil
 }
 
-// GetWithTTL retrieves the value associated with the provided key from the layered cache storage along with its TTL.
-// if the key is found in a lower layer, it will be set in all upper layers to optimize future access.
-// for example, if the key is found in the third layer, it will be set in the first and second layers as well.
+// GetWithTTL reads layers in order and returns the first hit.
+//
+// Read/error semantics:
+//   - ErrKeyNotExists from a layer is treated as miss and lookup continues.
+//   - Any other layer read error fails the call immediately.
+//
+// Back-population semantics:
+//   - On lower-layer hit, upper layers [0..i-1] are populated via Set using returned ttl.
+//   - If any back-population Set fails, GetWithTTL returns an error even though
+//     a lower layer had a value.
 func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, error) {
 	for i, store := range s.stores {
 		val, ttl, err := store.GetWithTTL(ctx, key)
@@ -87,7 +104,10 @@ func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Dura
 	return nil, 0, anycache.ErrKeyNotExists
 }
 
-// Del deletes the value associated with the provided key from all layers of the cache storage.
+// Del deletes key from layers in order (0..N-1).
+//
+// This operation is non-atomic across layers: on first error it returns immediately,
+// and previously deleted layers are not restored.
 func (s *Storage) Del(ctx context.Context, key string) error {
 	for i, store := range s.stores {
 		err := store.Del(ctx, key)
