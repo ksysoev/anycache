@@ -2,6 +2,7 @@ package inmemory
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -446,4 +447,54 @@ func TestInMemoryCacheStorage_Close(t *testing.T) {
 	if err == nil {
 		t.Fatal("Close() succeeded unexpectedly on already closed storage")
 	}
+}
+
+func TestInMemory_LRUEviction_NoTTL(t *testing.T) {
+	s, err := New(3)
+	require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
+
+	t.Cleanup(func() { _ = s.Close() })
+
+	for i := 1; i <= 3; i++ {
+		err := s.Set(t.Context(), fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("value%d", i)), 0)
+		require.NoError(t, err, "Failed to set key%d: %v", i, err)
+	}
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3, but got %d", len(s.index))
+	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
+
+	for i := 1; i <= 6; i++ {
+		err := s.Set(t.Context(), fmt.Sprintf("newKey%d", i), []byte(fmt.Sprintf("newValue%d", i)), 0)
+		require.NoError(t, err, "Failed to set newKey%d: %v", i, err)
+	}
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3 after eviction, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3 after eviction, but got %d", len(s.index))
+	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 3 after eviction, but got %d", len(s.expiryQ))
+}
+
+func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
+	s, err := New(3)
+	require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
+
+	t.Cleanup(func() { _ = s.Close() })
+
+	for i := 1; i <= 3; i++ {
+		err := s.Set(t.Context(), fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("value%d", i)), time.Second)
+		require.NoError(t, err, "Failed to set key%d: %v", i, err)
+	}
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3, but got %d", len(s.index))
+	assert.Equal(t, 3, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
+
+	for i := 1; i <= 6; i++ {
+		err := s.Set(t.Context(), fmt.Sprintf("newKey%d", i), []byte(fmt.Sprintf("newValue%d", i)), time.Second)
+		require.NoError(t, err, "Failed to set newKey%d: %v", i, err)
+	}
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3 after eviction, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3 after eviction, but got %d", len(s.index))
+	assert.Equal(t, 3, len(s.expiryQ), "Expected expiry queue size to be 3 after eviction, but got %d", len(s.expiryQ))
 }

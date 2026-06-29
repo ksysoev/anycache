@@ -91,7 +91,7 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 		s.delete(item)
 	}
 
-	var expiry *time.Time
+	var expiry *time.Time = nil
 
 	if ttl > 0 {
 		expTime := time.Now().Add(ttl)
@@ -99,16 +99,20 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	}
 
 	item := &cacheItem{
-		key:    key,
-		value:  value,
-		expiry: expiry,
+		key:       key,
+		value:     value,
+		expiry:    expiry,
+		expiryPos: -1,
 	}
 
 	elem := s.items.PushBack(item)
 
 	item.lruPos = elem
 	s.index[key] = item
-	s.expiryQ.Push(item)
+
+	if item.expiry != nil {
+		s.expiryQ.Push(item)
+	}
 
 	return nil
 }
