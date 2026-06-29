@@ -64,9 +64,9 @@ func (s *Storage) Get(_ context.Context, key string) ([]byte, error) {
 }
 
 // Set stores a value associated with the provided key in the in-memory cache storage.
-func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Duration) error {
-	if s.ctx.Err() != nil {
-		return errors.New("storage is closed")
+func (s *Storage) Set(ctx context.Context, key string, value []byte, ttl time.Duration) error {
+	if err := s.checkCtx(ctx); err != nil {
+		return err
 	}
 
 	if ttl < 0 {
@@ -82,11 +82,16 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 
 	if len(s.index) >= s.limit {
 		leastUsed := s.items.Front()
-		item, _ := leastUsed.Value.(*cacheItem)
+
+		item, ok := leastUsed.Value.(*cacheItem)
+		if !ok {
+			return errors.New("failed to retrieve least recently used item, invalid type assertion")
+		}
+
 		s.delete(item)
 	}
 
-	var expiry *time.Time
+	var expiry *time.Time = nil
 
 	if ttl > 0 {
 		expTime := time.Now().Add(ttl)
@@ -94,28 +99,28 @@ func (s *Storage) Set(_ context.Context, key string, value []byte, ttl time.Dura
 	}
 
 	item := &cacheItem{
-		key:    key,
-		value:  value,
-		expiry: expiry,
+		key:       key,
+		value:     value,
+		expiry:    expiry,
+		expiryPos: -1,
 	}
 
-	elem := &list.Element{
-		Value: item,
-	}
+	elem := s.items.PushBack(item)
 
 	item.lruPos = elem
-
 	s.index[key] = item
-	s.items.PushBack(elem)
-	s.expiryQ.Push(item)
+
+	if item.expiry != nil {
+		heap.Push(&s.expiryQ, item)
+	}
 
 	return nil
 }
 
 // Del deletes the value associated with the provided key from the in-memory cache storage.
-func (s *Storage) Del(_ context.Context, key string) error {
-	if s.ctx.Err() != nil {
-		return errors.New("storage is closed")
+func (s *Storage) Del(ctx context.Context, key string) error {
+	if err := s.checkCtx(ctx); err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -137,9 +142,9 @@ func (s *Storage) Del(_ context.Context, key string) error {
 }
 
 // GetWithTTL retrieves the value and time-to-live (TTL) associated with the provided key from the in-memory cache storage.
-func (s *Storage) GetWithTTL(_ context.Context, key string) ([]byte, time.Duration, error) {
-	if s.ctx.Err() != nil {
-		return nil, 0, errors.New("storage is closed")
+func (s *Storage) GetWithTTL(ctx context.Context, key string) ([]byte, time.Duration, error) {
+	if err := s.checkCtx(ctx); err != nil {
+		return nil, 0, err
 	}
 
 	s.mu.Lock()
@@ -213,4 +218,21 @@ func (s *Storage) expiryLoop() {
 			s.mu.Unlock()
 		}
 	}
+}
+
+// checkCtx checks the context of the storage and the provided context for cancellation or closure.
+func (s *Storage) checkCtx(ctx context.Context) error {
+	if s.ctx.Err() != nil {
+		return errors.New("storage is closed")
+	}
+
+	if ctx == nil {
+		return nil
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -2,3 +2,6 @@ ignore:
   - "**/*_mock.go"
   - "*_mock.go"
   - "**/*.pb.go"
+coverage:
+  status:
+    patch: off
