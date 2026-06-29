@@ -488,6 +488,7 @@ func TestInMemory_LRUEviction_NoTTL(t *testing.T) {
 		assert.NoError(t, err, "Expected newKey%d to remain in cache, but got error: %v", i, err)
 		assert.Equal(t, fmt.Sprintf("newValue%d", i), string(got), "Expected newKey%d to have correct value", i)
 	}
+}
 
 func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 	s, err := New(3)
@@ -528,6 +529,7 @@ func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 		assert.NoError(t, err, "Expected newKey%d to remain in cache, but got error: %v", i, err)
 		assert.Equal(t, fmt.Sprintf("newValue%d", i), string(got), "Expected newKey%d to have correct value", i)
 	}
+}
 
 func TestInMemory_LRUEviction_AccessOrder(t *testing.T) {
 	s, err := New(3)
