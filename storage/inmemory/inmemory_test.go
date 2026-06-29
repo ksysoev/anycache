@@ -498,3 +498,39 @@ func TestInMemory_LRUEviction_WithTTL(t *testing.T) {
 	assert.Equal(t, 3, len(s.index), "Expected index size to be 3 after eviction, but got %d", len(s.index))
 	assert.Equal(t, 3, len(s.expiryQ), "Expected expiry queue size to be 3 after eviction, but got %d", len(s.expiryQ))
 }
+
+func TestInMemory_LRUEviction_AccessOrder(t *testing.T) {
+	s, err := New(3)
+	require.NoError(t, err, "Failed to create InMemoryCacheStorage: %v", err)
+
+	t.Cleanup(func() { _ = s.Close() })
+
+	for i := 1; i <= 3; i++ {
+		err := s.Set(t.Context(), fmt.Sprintf("key%d", i), []byte(fmt.Sprintf("value%d", i)), 0)
+		require.NoError(t, err, "Failed to set key%d: %v", i, err)
+	}
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3, but got %d", len(s.index))
+	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
+
+	value, err := s.Get(t.Context(), "key1")
+
+	assert.NoError(t, err, "Failed to get key1: %v", err)
+	assert.Equal(t, "value1", string(value), "Expected to get value1, but got '%v'", string(value))
+
+	err = s.Set(t.Context(), "key4", []byte("value4"), 0)
+	require.NoError(t, err, "Failed to set key4: %v", err)
+
+	value, err = s.Get(t.Context(), "key2")
+	assert.Error(t, err, "Expected to get an error for key2, but got nil")
+	assert.Equal(t, "", string(value), "Expected to get an empty value for key2, but got '%v'", string(value))
+
+	value, err = s.Get(t.Context(), "key1")
+	assert.NoError(t, err, "Failed to get key1: %v", err)
+	assert.Equal(t, "value1", string(value), "Expected to get value1, but got '%v'", string(value))
+
+	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3, but got %d", s.items.Len())
+	assert.Equal(t, 3, len(s.index), "Expected index size to be 3, but got %d", len(s.index))
+	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
+}
