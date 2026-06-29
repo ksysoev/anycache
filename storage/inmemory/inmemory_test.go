@@ -462,7 +462,7 @@ func TestInMemory_LRUEviction_NoTTL(t *testing.T) {
 
 	assert.Equal(t, 3, s.items.Len(), "Expected list size to be 3, but got %d", s.items.Len())
 	assert.Equal(t, 3, len(s.index), "Expected index size to be 3, but got %d", len(s.index))
-	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 3, but got %d", len(s.expiryQ))
+	assert.Equal(t, 0, len(s.expiryQ), "Expected expiry queue size to be 0, but got %d", len(s.expiryQ))
 
 	for i := 1; i <= 6; i++ {
 		err := s.Set(t.Context(), fmt.Sprintf("newKey%d", i), []byte(fmt.Sprintf("newValue%d", i)), 0)
