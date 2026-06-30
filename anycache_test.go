@@ -112,31 +112,115 @@ func TestCacheJSON(t *testing.T) {
 	cache := New(store)
 	store.EXPECT().Get(mock.Anything, "TestCacheJSONKey").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "TestCacheJSONKey", []byte("{\"foo\":\"bar\"}"), mock.Anything).Return(nil)
-	// Define a test key and value
+
 	key := "TestCacheJSONKey"
 	value := map[string]string{
 		"foo": "bar",
 	}
 
-	// Define a generator function that returns the test value
 	generator := func(_ context.Context) (any, error) {
 		return value, nil
 	}
 
-	// Define a result variable to hold the unmarshalled JSON value
 	var result map[string]string
 
-	// Call the CacheJSON function to cache the test value
 	err := cache.CacheStruct(t.Context(), key, time.Second, generator, &result)
-	// Check that the function returned no errors
 	if err != nil {
 		t.Errorf("CacheJSON returned an error: %v", err)
 	}
 
-	// Check that the result variable contains the expected value
 	if result["foo"] != "bar" {
 		t.Errorf("CacheJSON returned an unexpected value: %v", result)
 	}
+}
+
+type testCodec struct {
+	encodeFn func(value any) ([]byte, error)
+	decodeFn func(data []byte, value any) error
+}
+
+func (tc testCodec) Encode(value any) ([]byte, error) {
+	return tc.encodeFn(value)
+}
+
+func (tc testCodec) Decode(data []byte, value any) error {
+	return tc.decodeFn(data, value)
+}
+
+func TestCacheStruct_UsesCustomCodec(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	codec := testCodec{
+		encodeFn: func(value any) ([]byte, error) {
+			assert.Equal(t, map[string]string{"foo": "bar"}, value)
+			return []byte("encoded"), nil
+		},
+		decodeFn: func(data []byte, value any) error {
+			assert.Equal(t, []byte("encoded"), data)
+
+			out, ok := value.(*map[string]string)
+			assert.True(t, ok)
+
+			(*out)["foo"] = "bar"
+
+			return nil
+		},
+	}
+	cache := New(store, WithCodec(codec))
+
+	store.EXPECT().Get(mock.Anything, "custom-codec").Return(nil, ErrKeyNotExists)
+	store.EXPECT().Set(mock.Anything, "custom-codec", []byte("encoded"), mock.Anything).Return(nil)
+
+	var result = map[string]string{}
+
+	err := cache.CacheStruct(t.Context(), "custom-codec", time.Second, func(_ context.Context) (any, error) {
+		return map[string]string{"foo": "bar"}, nil
+	}, &result)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "bar", result["foo"])
+}
+
+func TestCacheStruct_CustomCodecEncodeError(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	codec := testCodec{
+		encodeFn: func(_ any) ([]byte, error) {
+			return nil, assert.AnError
+		},
+		decodeFn: func(_ []byte, _ any) error {
+			return nil
+		},
+	}
+	cache := New(store, WithCodec(codec))
+
+	store.EXPECT().Get(mock.Anything, "custom-codec-encode-error").Return(nil, ErrKeyNotExists)
+
+	err := cache.CacheStruct(t.Context(), "custom-codec-encode-error", time.Second, func(_ context.Context) (any, error) {
+		return map[string]string{"foo": "bar"}, nil
+	}, &map[string]string{})
+
+	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestCacheStruct_CustomCodecDecodeError(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	codec := testCodec{
+		encodeFn: func(_ any) ([]byte, error) {
+			return []byte("encoded"), nil
+		},
+		decodeFn: func(_ []byte, _ any) error {
+			return assert.AnError
+		},
+	}
+	cache := New(store, WithCodec(codec))
+
+	store.EXPECT().Get(mock.Anything, "custom-codec-decode-error").Return([]byte("encoded"), nil)
+
+	err := cache.CacheStruct(t.Context(), "custom-codec-decode-error", time.Second, func(_ context.Context) (any, error) {
+		t.Fatal("generator should not be called on cache hit")
+		return nil, nil
+	}, &map[string]string{})
+
+	assert.ErrorIs(t, err, assert.AnError)
 }
 
 func TestCancelingRequest(t *testing.T) {
