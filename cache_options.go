@@ -52,3 +52,14 @@ func WithMetricHook(hook func(key string, op State, latency time.Duration)) func
 		c.observer = hook
 	}
 }
+
+// WithCodec sets the codec used for encoding and decoding cache values.
+func WithCodec(codec Codec) func(*Cache) {
+	if codec == nil {
+		panic("codec cannot be nil")
+	}
+
+	return func(c *Cache) {
+		c.codec = codec
+	}
+}
