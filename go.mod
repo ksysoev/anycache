@@ -6,20 +6,13 @@ require (
 	github.com/bradfitz/gomemcache v0.0.0-20230905024940-24af94b03874
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/stretchr/testify v1.11.1
+	github.com/vmihailenco/msgpack/v5 v5.4.1
+	go.mongodb.org/mongo-driver/v2 v2.4.2
 	golang.org/x/sync v0.21.0
 	google.golang.org/protobuf v1.36.11
 )
 
-require (
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
-	github.com/hamba/avro/v2 v2.31.0 // indirect
-	github.com/json-iterator/go v1.1.12 // indirect
-	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
-	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
-	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	go.mongodb.org/mongo-driver/v2 v2.4.0 // indirect
-)
+require github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
