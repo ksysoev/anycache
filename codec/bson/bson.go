@@ -1,3 +1,4 @@
+// Package bson provides a codec that uses BSON marshaling and unmarshaling for encoding and decoding data.
 package bson
 
 import mongobson "go.mongodb.org/mongo-driver/v2/bson"

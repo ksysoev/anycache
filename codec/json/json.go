@@ -1,3 +1,4 @@
+// Package json provides a codec implementation that uses JSON marshaling and unmarshaling for encoding and decoding values.
 package json
 
 import "encoding/json"

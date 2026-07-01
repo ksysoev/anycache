@@ -1,3 +1,4 @@
+// Package msgpack provides a codec implementation using MessagePack for encoding and decoding caching data.
 package msgpack
 
 import "github.com/vmihailenco/msgpack/v5"

@@ -1,3 +1,4 @@
+// Package gob provides a codec implementation that uses Gob encoding and decoding for values.
 package gob
 
 import (
@@ -11,6 +12,7 @@ type Codec struct{}
 // Encode encodes the given value into a Gob byte slice.
 func (c Codec) Encode(value any) ([]byte, error) {
 	var buf bytes.Buffer
+
 	encoder := gob.NewEncoder(&buf)
 
 	if err := encoder.Encode(value); err != nil {
