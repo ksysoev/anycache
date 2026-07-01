@@ -108,6 +108,7 @@ if err := cache.Invalidate(ctx, "user:profile"); err != nil {
 - `WithKeyPrefix(prefix)` — namespace keys.
 - `WithBaseContext(ctx)` — set base context for internal/background work.
 - `WithMetricHook(func(key string, op anycache.State, latency time.Duration))` — default per-request metric hook.
+- `WithCodec(codec)` — override default JSON codec for `CacheStruct`.
 
 ### Request-level options
 

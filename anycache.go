@@ -3,7 +3,6 @@ package anycache
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,6 +44,7 @@ type CacheStorage interface {
 // Cache provides cache-aside operations on top of a CacheStorage backend.
 type Cache struct {
 	Storage     CacheStorage
+	codec       Codec
 	ctx         context.Context
 	sf          singleflight.Group
 	cancelCtx   context.CancelFunc
@@ -79,6 +79,7 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
+		codec:     JSONCodec{},
 	}
 
 	for _, opt := range opts {
@@ -167,7 +168,7 @@ func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, gener
 	return string(val), nil
 }
 
-// CacheStruct caches a generated value as JSON and unmarshals it into result.
+// CacheStruct caches a generated value as encoded bytes string and decodes it into result.
 //
 // result must be a pointer that can be unmarshaled into.
 // ttl must be greater than zero.
@@ -178,12 +179,12 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, 
 			return nil, err
 		}
 
-		jsonVal, err := json.Marshal(val)
+		data, err := c.codec.Encode(val)
 		if err != nil {
 			return nil, err
 		}
 
-		return jsonVal, nil
+		return data, nil
 	}
 
 	val, err := c.Cache(ctx, key, ttl, generatorWrapper, opts...)
@@ -191,7 +192,7 @@ func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, 
 		return err
 	}
 
-	err = json.Unmarshal(val, result)
+	err = c.codec.Decode(val, result)
 
 	return err
 }

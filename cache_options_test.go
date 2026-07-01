@@ -121,3 +121,18 @@ func TestWithMetricHook_PanicsOnNilHook(t *testing.T) {
 		WithMetricHook(nil)
 	})
 }
+
+func TestWithCodec(t *testing.T) {
+	mockStorage := NewMockCacheStorage(t)
+	codec := JSONCodec{}
+
+	cache := New(mockStorage, WithCodec(codec))
+
+	assert.Equal(t, codec, cache.codec)
+}
+
+func TestWithCodec_PanicsOnNilCodec(t *testing.T) {
+	assert.PanicsWithValue(t, "codec cannot be nil", func() {
+		WithCodec(nil)
+	})
+}
