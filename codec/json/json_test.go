@@ -1,4 +1,4 @@
-package anycache
+package json
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 )
 
 func TestJSONCodec_Encode(t *testing.T) {
-	codec := JSONCodec{}
+	codec := Codec{}
 	value := map[string]string{"foo": "bar"}
 
 	data, err := codec.Encode(value)
@@ -17,7 +17,7 @@ func TestJSONCodec_Encode(t *testing.T) {
 }
 
 func TestJSONCodec_Decode(t *testing.T) {
-	codec := JSONCodec{}
+	codec := Codec{}
 	data := []byte(`{"foo":"bar"}`)
 
 	var result map[string]string
@@ -29,7 +29,7 @@ func TestJSONCodec_Decode(t *testing.T) {
 }
 
 func TestJSONCodec_EncodeError(t *testing.T) {
-	codec := JSONCodec{}
+	codec := Codec{}
 
 	_, err := codec.Encode(make(chan int))
 
@@ -37,7 +37,7 @@ func TestJSONCodec_EncodeError(t *testing.T) {
 }
 
 func TestJSONCodec_DecodeError(t *testing.T) {
-	codec := JSONCodec{}
+	codec := Codec{}
 
 	var result map[string]string
 
