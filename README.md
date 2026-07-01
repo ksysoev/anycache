@@ -108,7 +108,7 @@ if err := cache.Invalidate(ctx, "user:profile"); err != nil {
 - `WithKeyPrefix(prefix)` — namespace keys.
 - `WithBaseContext(ctx)` — set base context for internal/background work.
 - `WithMetricHook(func(key string, op anycache.State, latency time.Duration))` — default per-request metric hook.
-- `WithCodec(codec)` — override default JSON codec for `CacheStruct`, AnyCache Provice codecs for JSON, MSGPack, BSON and Gob formats. See `anycache/codec` for details.
+- `WithCodec(codec)` — override the default JSON codec for `CacheStruct`. AnyCache provides codecs for JSON, MessagePack, BSON, and Gob formats. See `codec/*` for details.
 
 ### Request-level options
 
