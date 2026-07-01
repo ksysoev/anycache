@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ksysoev/anycache/codec/json"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -124,7 +125,7 @@ func TestWithMetricHook_PanicsOnNilHook(t *testing.T) {
 
 func TestWithCodec(t *testing.T) {
 	mockStorage := NewMockCacheStorage(t)
-	codec := JSONCodec{}
+	codec := json.Codec{}
 
 	cache := New(mockStorage, WithCodec(codec))
 

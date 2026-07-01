@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ksysoev/anycache/codec/json"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -79,7 +80,7 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 		Storage:   store,
 		ctx:       ctx,
 		cancelCtx: cancelCtx,
-		codec:     JSONCodec{},
+		codec:     json.Codec{},
 	}
 
 	for _, opt := range opts {
