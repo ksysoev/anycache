@@ -168,7 +168,7 @@ func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, gener
 	return string(val), nil
 }
 
-// CacheStruct caches a generated value as JSON and unmarshals it into result.
+// CacheStruct caches a generated value as encoded bytes string and decodes it into result.
 //
 // result must be a pointer that can be unmarshaled into.
 // ttl must be greater than zero.
