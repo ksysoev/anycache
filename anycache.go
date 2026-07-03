@@ -57,14 +57,16 @@ type Cache struct {
 }
 
 type Request struct {
-	ctx        context.Context
-	MetricHook func(key string, op State, latency time.Duration)
-	TTL        time.Duration
-	WarmUpTTL  time.Duration
-	Timeout    time.Duration
+	ctx         context.Context
+	MetricHook  func(key string, op State, latency time.Duration)
+	TTL         time.Duration
+	WarmUpTTL   time.Duration
+	Timeout     time.Duration
+	isCacheable func([]byte) bool
 }
 
 type (
+	generator       func(ctx context.Context) ([]byte, bool, error)
 	CacheGenerator  func(ctx context.Context) ([]byte, error)
 	CacheGeneratorS func(ctx context.Context) (string, error)
 	CacheOptions    func(*Cache)
@@ -128,8 +130,20 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
 	key = c.keyPrefix + key
+	gen := func(ctx context.Context) ([]byte, bool, error) {
+		res, err := generator(ctx)
+		if err != nil {
+			return nil, false, err
+		}
 
-	res := c.processRequest(key, generator, req)
+		if req.isCacheable != nil && !req.isCacheable(res) {
+			return res, false, err
+		}
+
+		return res, true, nil
+	}
+
+	res := c.processRequest(key, gen, req)
 
 	select {
 	case <-ctx.Done():
@@ -213,10 +227,14 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) ([]byte, error) {
-	value, err := generator(ctx)
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator generator) ([]byte, error) {
+	value, cachable, err := generator(ctx)
 	if err != nil {
 		return value, err
+	}
+
+	if !cachable {
+		return value, nil
 	}
 
 	ttl = randomizeTTL(c.maxShiftTTL, ttl)
@@ -255,7 +273,7 @@ func (c *Cache) Close() error {
 }
 
 // processRequest processes a cache request for the given key using the provided generator function and request options.
-func (c *Cache) processRequest(key string, generator CacheGenerator, req Request) <-chan singleflight.Result {
+func (c *Cache) processRequest(key string, generator generator, req Request) <-chan singleflight.Result {
 	return c.sf.DoChan(key, func() (value any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
@@ -328,7 +346,7 @@ func (c *Cache) processRequest(key string, generator CacheGenerator, req Request
 
 // startWarmUp starts a background goroutine to warm up the cache for the given key
 // using the provided generator function and request options.
-func (c *Cache) startWarmUp(key string, generator CacheGenerator, req Request) {
+func (c *Cache) startWarmUp(key string, generator generator, req Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
 
