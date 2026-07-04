@@ -59,10 +59,10 @@ type Cache struct {
 type Request struct {
 	ctx         context.Context
 	MetricHook  func(key string, op State, latency time.Duration)
+	shouldCache func([]byte) bool
 	TTL         time.Duration
 	WarmUpTTL   time.Duration
 	Timeout     time.Duration
-	shouldCache func([]byte) bool
 }
 
 type (

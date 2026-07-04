@@ -82,6 +82,7 @@ func TestCache_WithShouldCache_SkipsStorageSet(t *testing.T) {
 	store.EXPECT().Get(mock.Anything, "skip-cache").Return(nil, ErrKeyNotExists).Twice()
 
 	var generatorCalls atomic.Int32
+
 	generator := func(_ context.Context) ([]byte, error) {
 		call := generatorCalls.Add(1)
 		return []byte(fmt.Sprintf("generated-%d", call)), nil
@@ -105,12 +106,16 @@ func TestCache_WithShouldCache_DisablesSingleflight(t *testing.T) {
 	store.EXPECT().Get(mock.Anything, "skip-cache-concurrent").Return(nil, ErrKeyNotExists).Twice()
 
 	var generatorCalls atomic.Int32
+
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
 
+	//nolint:unparam // the parameters are not used in this test
 	generator := func(_ context.Context) ([]byte, error) {
 		call := generatorCalls.Add(1)
+
 		started <- struct{}{}
+
 		<-release
 
 		return []byte(fmt.Sprintf("generated-%d", call)), nil
@@ -123,6 +128,7 @@ func TestCache_WithShouldCache_DisablesSingleflight(t *testing.T) {
 		go func() {
 			val, err := cache.Cache(t.Context(), "skip-cache-concurrent", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
 			results <- val
+
 			errs <- err
 		}()
 	}
@@ -241,7 +247,7 @@ func TestCacheStruct_UsesCustomCodec(t *testing.T) {
 	store.EXPECT().Get(mock.Anything, "custom-codec").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "custom-codec", []byte("encoded"), mock.Anything).Return(nil)
 
-	var result = map[string]string{}
+	result := map[string]string{}
 
 	err := cache.CacheStruct(t.Context(), "custom-codec", time.Second, func(_ context.Context) (any, error) {
 		return map[string]string{"foo": "bar"}, nil
@@ -603,7 +609,8 @@ func TestCacheMetricHook_KeyNotUsesPrefixedStorageKey(t *testing.T) {
 
 	var observedKey string
 
-	cache := New(store,
+	cache := New(
+		store,
 		WithKeyPrefix("p::"),
 		WithMetricHook(func(key string, _ State, _ time.Duration) {
 			observedKey = key
