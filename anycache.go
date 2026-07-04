@@ -271,6 +271,7 @@ func (c *Cache) Close() error {
 	return nil
 }
 
+// processRequestWithDeDuplication processes a cache request for the given key using the provided generator function and request options.
 func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req Request) (*result, error) {
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		return c.processRequest(key, generator, req)

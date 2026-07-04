@@ -29,3 +29,12 @@ func WithTimeout(timeout time.Duration) CacheItemOptions {
 		req.Timeout = timeout
 	}
 }
+
+// WithCacheBypass sets a custom function to determine whether the generated value should be cached or not.
+// The function takes the generated value as input and
+// returns a boolean indicating whether to cache it (true) or bypass caching (false).
+func WithCacheBypass(checker func([]byte) bool) CacheItemOptions {
+	return func(req *Request) {
+		req.isCacheable = checker
+	}
+}
