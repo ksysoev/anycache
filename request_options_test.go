@@ -97,7 +97,7 @@ func TestWithShouldCache_SetsPredicate(t *testing.T) {
 	assert.False(t, req.shouldCache(nil))
 }
 
-func TestWithShouldCache_NotAllowsNilPredicate(t *testing.T) {
+func TestWithShouldCache_DoesNotAllowNilPredicate(t *testing.T) {
 	req := &Request{shouldCache: func([]byte) bool { return true }}
 
 	assert.PanicsWithValue(t, "shouldCache function cannot be nil", func() {
