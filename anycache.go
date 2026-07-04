@@ -226,8 +226,8 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator generator) ([]byte, error) {
-	value, cacheable, err := generator(ctx)
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, gen generator) ([]byte, error) {
+	value, cacheable, err := gen(ctx)
 	if err != nil {
 		return value, err
 	}
