@@ -62,7 +62,7 @@ type Request struct {
 	TTL         time.Duration
 	WarmUpTTL   time.Duration
 	Timeout     time.Duration
-	isCacheable func([]byte) bool
+	shouldCache func([]byte) bool
 }
 
 type (
@@ -136,7 +136,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 			return nil, false, err
 		}
 
-		if req.isCacheable != nil && !req.isCacheable(res) {
+		if req.shouldCache != nil && !req.shouldCache(res) {
 			return res, false, err
 		}
 
@@ -148,7 +148,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		err error
 	)
 
-	if req.isCacheable != nil {
+	if req.shouldCache != nil {
 		val, err = c.processRequest(key, gen, req)
 	} else {
 		val, err = c.processRequestWithDeDuplication(ctx, key, gen, req)
@@ -227,12 +227,12 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
 func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator generator) ([]byte, error) {
-	value, cachable, err := generator(ctx)
+	value, cacheable, err := generator(ctx)
 	if err != nil {
 		return value, err
 	}
 
-	if !cachable {
+	if !cacheable {
 		return value, nil
 	}
 
