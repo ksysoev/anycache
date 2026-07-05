@@ -29,3 +29,16 @@ func WithTimeout(timeout time.Duration) CacheItemOptions {
 		req.Timeout = timeout
 	}
 }
+
+// WithShouldCache sets a predicate that decides whether the generated value should be cached.
+// The function takes the generated value as input and
+// returns true to cache it or false to skip caching.
+func WithShouldCache(shouldCache func([]byte) bool) CacheItemOptions {
+	if shouldCache == nil {
+		panic("shouldCache function cannot be nil")
+	}
+
+	return func(req *Request) {
+		req.shouldCache = shouldCache
+	}
+}

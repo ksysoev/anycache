@@ -3,6 +3,7 @@ package anycache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,6 +73,82 @@ func TestCacheConcurrency(t *testing.T) {
 	assert.Contains(t, [][]byte{[]byte("testValue"), []byte("testValue1")}, val1, "Expected to get testValue or testValue1 as a result, but got '%v'", val1)
 	assert.Contains(t, [][]byte{[]byte("testValue"), []byte("testValue1")}, val2, "Expected to get testValue or testValue1 as a result, but got '%v'", val2)
 	assert.Equal(t, val1, val2, "Expected to get the same value for both calls, but got '%v' and '%v'", val1, val2)
+}
+
+func TestCache_WithShouldCache_SkipsStorageSet(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "skip-cache").Return(nil, ErrKeyNotExists).Twice()
+
+	var generatorCalls atomic.Int32
+
+	generator := func(_ context.Context) ([]byte, error) {
+		call := generatorCalls.Add(1)
+		return []byte(fmt.Sprintf("generated-%d", call)), nil
+	}
+
+	first, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("generated-1"), first)
+
+	second, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("generated-2"), second)
+
+	assert.Equal(t, int32(2), generatorCalls.Load(), "expected generator to run for each request when cache is bypassed")
+}
+
+func TestCache_WithShouldCache_DisablesSingleflight(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "skip-cache-concurrent").Return(nil, ErrKeyNotExists).Twice()
+
+	var generatorCalls atomic.Int32
+
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+
+	//nolint:unparam // the parameters are not used in this test
+	generator := func(_ context.Context) ([]byte, error) {
+		call := generatorCalls.Add(1)
+
+		started <- struct{}{}
+
+		<-release
+
+		return []byte(fmt.Sprintf("generated-%d", call)), nil
+	}
+
+	results := make(chan []byte, 2)
+	errs := make(chan error, 2)
+
+	for range 2 {
+		go func() {
+			val, err := cache.Cache(t.Context(), "skip-cache-concurrent", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+			results <- val
+
+			errs <- err
+		}()
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("expected both generators to start")
+		}
+	}
+
+	close(release)
+
+	assert.NoError(t, <-errs)
+	assert.NoError(t, <-errs)
+
+	actual := []string{string(<-results), string(<-results)}
+	assert.ElementsMatch(t, []string{"generated-1", "generated-2"}, actual)
+	assert.Equal(t, int32(2), generatorCalls.Load(), "expected generator to run twice without singleflight de-duplication")
 }
 
 func TestCacheMetricHook_WarmUp(t *testing.T) {
@@ -170,7 +247,7 @@ func TestCacheStruct_UsesCustomCodec(t *testing.T) {
 	store.EXPECT().Get(mock.Anything, "custom-codec").Return(nil, ErrKeyNotExists)
 	store.EXPECT().Set(mock.Anything, "custom-codec", []byte("encoded"), mock.Anything).Return(nil)
 
-	var result = map[string]string{}
+	result := map[string]string{}
 
 	err := cache.CacheStruct(t.Context(), "custom-codec", time.Second, func(_ context.Context) (any, error) {
 		return map[string]string{"foo": "bar"}, nil
@@ -532,7 +609,8 @@ func TestCacheMetricHook_KeyNotUsesPrefixedStorageKey(t *testing.T) {
 
 	var observedKey string
 
-	cache := New(store,
+	cache := New(
+		store,
 		WithKeyPrefix("p::"),
 		WithMetricHook(func(key string, _ State, _ time.Duration) {
 			observedKey = key

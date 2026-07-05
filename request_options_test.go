@@ -83,3 +83,24 @@ func TestWithTimeout_ZeroDuration(t *testing.T) {
 
 	assert.Zero(t, req.Timeout)
 }
+
+func TestWithShouldCache_SetsPredicate(t *testing.T) {
+	req := &Request{}
+	predicate := func(value []byte) bool {
+		return len(value) > 0
+	}
+
+	WithShouldCache(predicate)(req)
+
+	assert.NotNil(t, req.shouldCache)
+	assert.True(t, req.shouldCache([]byte("value")))
+	assert.False(t, req.shouldCache(nil))
+}
+
+func TestWithShouldCache_DoesNotAllowNilPredicate(t *testing.T) {
+	req := &Request{shouldCache: func([]byte) bool { return true }}
+
+	assert.PanicsWithValue(t, "shouldCache function cannot be nil", func() {
+		WithShouldCache(nil)(req)
+	})
+}

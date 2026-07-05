@@ -57,14 +57,16 @@ type Cache struct {
 }
 
 type Request struct {
-	ctx        context.Context
-	MetricHook func(key string, op State, latency time.Duration)
-	TTL        time.Duration
-	WarmUpTTL  time.Duration
-	Timeout    time.Duration
+	ctx         context.Context
+	MetricHook  func(key string, op State, latency time.Duration)
+	shouldCache func([]byte) bool
+	TTL         time.Duration
+	WarmUpTTL   time.Duration
+	Timeout     time.Duration
 }
 
 type (
+	generator       func(ctx context.Context) ([]byte, bool, error)
 	CacheGenerator  func(ctx context.Context) ([]byte, error)
 	CacheGeneratorS func(ctx context.Context) (string, error)
 	CacheOptions    func(*Cache)
@@ -128,26 +130,37 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
 	key = c.keyPrefix + key
-
-	res := c.processRequest(key, generator, req)
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case resp := <-res:
-		if resp.Err != nil {
-			return nil, resp.Err
+	gen := func(ctx context.Context) ([]byte, bool, error) {
+		res, err := generator(ctx)
+		if err != nil {
+			return nil, false, err
 		}
 
-		val, ok := resp.Val.(*result)
-		if !ok {
-			return nil, errors.New("unexpected value type returned from cache processing")
+		if req.shouldCache != nil && !req.shouldCache(res) {
+			return res, false, err
 		}
 
-		state = val.state
-
-		return val.data, nil
+		return res, true, nil
 	}
+
+	var (
+		val *result
+		err error
+	)
+
+	if req.shouldCache != nil {
+		val, err = c.processRequest(key, gen, req)
+	} else {
+		val, err = c.processRequestWithDeDuplication(ctx, key, gen, req)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	state = val.state
+
+	return val.data, nil
 }
 
 // CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
@@ -213,10 +226,14 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator) ([]byte, error) {
-	value, err := generator(ctx)
+func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, gen generator) ([]byte, error) {
+	value, cacheable, err := gen(ctx)
 	if err != nil {
 		return value, err
+	}
+
+	if !cacheable {
+		return value, nil
 	}
 
 	ttl = randomizeTTL(c.maxShiftTTL, ttl)
@@ -254,81 +271,102 @@ func (c *Cache) Close() error {
 	return nil
 }
 
-// processRequest processes a cache request for the given key using the provided generator function and request options.
-func (c *Cache) processRequest(key string, generator CacheGenerator, req Request) <-chan singleflight.Result {
-	return c.sf.DoChan(key, func() (value any, err error) {
-		defer func() {
-			if r := recover(); r != nil {
-				err = fmt.Errorf("cache.Cache panicked: %v", r)
-				value = nil
-			}
-		}()
-
-		if req.Timeout > 0 {
-			var cancel context.CancelFunc
-
-			req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
-			defer cancel()
-		}
-
-		var (
-			sfState            State
-			data               []byte
-			needWarmUp         bool
-			acquiredWarmUpLock bool
-			warmUpStarted      bool
-		)
-
-		defer func() {
-			if acquiredWarmUpLock && !warmUpStarted {
-				c.warmUpLocks.Delete(key)
-			}
-		}()
-
-		if req.WarmUpTTL > 0 {
-			var ttl time.Duration
-
-			_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
-			acquiredWarmUpLock = !warmUpLockBusy
-
-			data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
-
-			readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
-			if err == nil && readyForWarmUp {
-				needWarmUp = true
-			}
-		} else {
-			data, err = c.Storage.Get(req.ctx, key)
-		}
-
-		switch {
-		case errors.Is(err, ErrKeyNotExists):
-			sfState = CacheMiss
-
-			data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
-			if err != nil {
-				return nil, err
-			}
-		case err != nil:
-			return nil, err
-		default:
-			sfState = CacheHit
-		}
-
-		if needWarmUp && acquiredWarmUpLock {
-			c.startWarmUp(key, generator, req)
-
-			warmUpStarted = true
-			sfState = CacheWarmUp
-		}
-
-		return &result{data: data, state: sfState}, err
+// processRequestWithDeDuplication processes a cache request for the given key using the provided generator function and request options.
+func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req Request) (*result, error) {
+	res := c.sf.DoChan(key, func() (value any, err error) {
+		return c.processRequest(key, generator, req)
 	})
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case resp := <-res:
+		if resp.Err != nil {
+			return nil, resp.Err
+		}
+
+		val, ok := resp.Val.(*result)
+		if !ok {
+			return nil, errors.New("unexpected value type returned from cache processing")
+		}
+
+		return val, nil
+	}
+}
+
+// processRequest processes a cache request for the given key using the provided generator function and request options.
+func (c *Cache) processRequest(key string, generator generator, req Request) (value *result, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("cache.Cache panicked: %v", r)
+			value = nil
+		}
+	}()
+
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+
+		req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+		defer cancel()
+	}
+
+	var (
+		sfState            State
+		data               []byte
+		needWarmUp         bool
+		acquiredWarmUpLock bool
+		warmUpStarted      bool
+	)
+
+	defer func() {
+		if acquiredWarmUpLock && !warmUpStarted {
+			c.warmUpLocks.Delete(key)
+		}
+	}()
+
+	if req.WarmUpTTL > 0 {
+		var ttl time.Duration
+
+		_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
+		acquiredWarmUpLock = !warmUpLockBusy
+
+		data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
+
+		readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
+		if err == nil && readyForWarmUp {
+			needWarmUp = true
+		}
+	} else {
+		data, err = c.Storage.Get(req.ctx, key)
+	}
+
+	switch {
+	case errors.Is(err, ErrKeyNotExists):
+		sfState = CacheMiss
+
+		data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
+		if err != nil {
+			return nil, err
+		}
+	case err != nil:
+		return nil, err
+	default:
+		sfState = CacheHit
+	}
+
+	if needWarmUp && acquiredWarmUpLock {
+		c.startWarmUp(key, generator, req)
+
+		warmUpStarted = true
+		sfState = CacheWarmUp
+	}
+
+	return &result{data: data, state: sfState}, err
 }
 
 // startWarmUp starts a background goroutine to warm up the cache for the given key
 // using the provided generator function and request options.
-func (c *Cache) startWarmUp(key string, generator CacheGenerator, req Request) {
+func (c *Cache) startWarmUp(key string, generator generator, req Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
 
