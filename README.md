@@ -123,8 +123,9 @@ Metric states: `hit`, `miss`, `warm_up`, `error`.
 - **Singleflight dedupe scope:** concurrent requests for the same key are deduplicated within a single `anycache.Cache` instance.
 - **Warm-up behavior (`WithWarmUpTTL`):** when a key exists and its remaining TTL is `> 0` and `<= warmUpTTL`, anycache returns the current cached value immediately and schedules a background refresh.
 - **Warm-up lock semantics:** only one warm-up refresh per key is started at a time; concurrent requests do not start duplicate warm-up goroutines.
-- **Timeout and base context (`WithTimeout` + `WithBaseContext`):** internal storage and generator work runs on the cache base context (default or `WithBaseContext`). With `WithTimeout`, a timeout is applied to that base context for internal work.
-- **Caller cancellation expectations:** because internal work uses the cache base context, caller context values/cancellation are not directly propagated into internal storage/generator execution.
+- **Context model for deduplicated requests:** singleflight-backed requests run storage/generator work on the cache base context (default or `WithBaseContext`) so one caller cancellation does not abort shared work for the same key.
+- **Timeout behavior (`WithTimeout` + caller deadlines):** `WithTimeout` sets an explicit timeout for internal work. If no explicit timeout is set and the caller context has a deadline, that deadline is mirrored as an internal timeout for the shared work.
+- **Caller cancellation expectations:** caller cancellation still stops waiting for that caller, but internal shared work continues on the cache base context.
 - **Lifecycle (`Close`):** call `Close()` during shutdown to cancel background work and wait for in-flight warm-up goroutines to finish.
 
 ## When to use anycache

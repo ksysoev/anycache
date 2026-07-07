@@ -332,7 +332,7 @@ func TestCancelingRequest(t *testing.T) {
 	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
 }
 
-func TestCache_DefaultContextForwarding_NoWithTimeout(t *testing.T) {
+func TestCache_DefaultContextDecouplesValues_NoWithTimeout(t *testing.T) {
 	type ctxKey string
 
 	const key ctxKey = "request-id"
@@ -343,16 +343,16 @@ func TestCache_DefaultContextForwarding_NoWithTimeout(t *testing.T) {
 	ctx := context.WithValue(context.Background(), key, "req-123")
 
 	store.EXPECT().Get(mock.Anything, "ctx-forwarding").RunAndReturn(func(gotCtx context.Context, _ string) ([]byte, error) {
-		assert.Equal(t, "req-123", gotCtx.Value(key))
+		assert.Nil(t, gotCtx.Value(key))
 		return nil, ErrKeyNotExists
 	})
 	store.EXPECT().Set(mock.Anything, "ctx-forwarding", []byte("generated"), mock.Anything).RunAndReturn(func(gotCtx context.Context, _ string, _ []byte, _ time.Duration) error {
-		assert.Equal(t, "req-123", gotCtx.Value(key))
+		assert.Nil(t, gotCtx.Value(key))
 		return nil
 	})
 
 	result, err := cache.Cache(ctx, "ctx-forwarding", time.Second, func(gotCtx context.Context) ([]byte, error) {
-		assert.Equal(t, "req-123", gotCtx.Value(key))
+		assert.Nil(t, gotCtx.Value(key))
 		return []byte("generated"), nil
 	})
 
@@ -367,13 +367,19 @@ func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T)
 
 		store.EXPECT().Get(mock.Anything, "ctx-deadline").Return(nil, ErrKeyNotExists)
 
-		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		type ctxKey string
+		const key ctxKey = "request-id"
+
+		ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), key, "req-123"), 100*time.Millisecond)
 		defer cancel()
 
 		generatorStarted := make(chan struct{})
 
 		result, err := cache.Cache(ctx, "ctx-deadline", time.Second, func(genCtx context.Context) ([]byte, error) {
 			close(generatorStarted)
+			assert.Nil(t, genCtx.Value(key), "expected deduplicated work context to be decoupled from caller values")
+			_, hasDeadline := genCtx.Deadline()
+			assert.True(t, hasDeadline, "expected caller deadline to be mirrored as internal timeout")
 			<-genCtx.Done()
 
 			return nil, genCtx.Err()
