@@ -57,7 +57,6 @@ type Cache struct {
 }
 
 type Request struct {
-	ctx         context.Context
 	MetricHook  func(key string, op State, latency time.Duration)
 	shouldCache func([]byte) bool
 	TTL         time.Duration
@@ -111,8 +110,6 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 		opt(&req)
 	}
 
-	req.ctx = ctx
-
 	state := CacheError
 	start := time.Now()
 
@@ -149,7 +146,7 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 	)
 
 	if req.shouldCache != nil {
-		val, err = c.processRequest(key, gen, req)
+		val, err = c.processRequest(ctx, key, gen, req)
 	} else {
 		val, err = c.processRequestWithDeDuplication(ctx, key, gen, req)
 	}
@@ -273,8 +270,25 @@ func (c *Cache) Close() error {
 
 // processRequestWithDeDuplication processes a cache request for the given key using the provided generator function and request options.
 func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req Request) (*result, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Note: singleflight work should always run with a decoupled context
+	// so that one caller cancellation doesn't affect other requests for the same key.
+	// Use c.ctx (the cache base context) instead of the caller ctx here.
 	res := c.sf.DoChan(key, func() (value any, err error) {
-		return c.processRequest(key, generator, req)
+		reqLocal := req
+		if reqLocal.Timeout <= 0 {
+			if deadline, ok := ctx.Deadline(); ok {
+				reqLocal.Timeout = time.Until(deadline)
+				if reqLocal.Timeout <= 0 {
+					return nil, context.DeadlineExceeded
+				}
+			}
+		}
+
+		return c.processRequest(c.ctx, key, generator, reqLocal)
 	})
 
 	select {
@@ -295,7 +309,7 @@ func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string,
 }
 
 // processRequest processes a cache request for the given key using the provided generator function and request options.
-func (c *Cache) processRequest(key string, generator generator, req Request) (value *result, err error) {
+func (c *Cache) processRequest(ctx context.Context, key string, generator generator, req Request) (value *result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("cache.Cache panicked: %v", r)
@@ -306,7 +320,7 @@ func (c *Cache) processRequest(key string, generator generator, req Request) (va
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
 
-		req.ctx, cancel = context.WithTimeout(c.ctx, req.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
 		defer cancel()
 	}
 
@@ -330,21 +344,21 @@ func (c *Cache) processRequest(key string, generator generator, req Request) (va
 		_, warmUpLockBusy := c.warmUpLocks.LoadOrStore(key, struct{}{})
 		acquiredWarmUpLock = !warmUpLockBusy
 
-		data, ttl, err = c.Storage.GetWithTTL(req.ctx, key)
+		data, ttl, err = c.Storage.GetWithTTL(ctx, key)
 
 		readyForWarmUp := ttl > 0 && ttl <= req.WarmUpTTL
 		if err == nil && readyForWarmUp {
 			needWarmUp = true
 		}
 	} else {
-		data, err = c.Storage.Get(req.ctx, key)
+		data, err = c.Storage.Get(ctx, key)
 	}
 
 	switch {
 	case errors.Is(err, ErrKeyNotExists):
 		sfState = CacheMiss
 
-		data, err = c.generateAndSet(req.ctx, key, req.TTL, generator)
+		data, err = c.generateAndSet(ctx, key, req.TTL, generator)
 		if err != nil {
 			return nil, err
 		}
