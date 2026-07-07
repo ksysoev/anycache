@@ -162,6 +162,7 @@ func TestCacheS_WithShouldCache_ReceivesStringValue(t *testing.T) {
 		str, ok := v.(string)
 		assert.True(t, ok)
 		assert.Equal(t, "generated", str)
+
 		return false
 	}
 
@@ -195,10 +196,12 @@ func TestCacheStruct_WithShouldCache_ReceivesStructValue(t *testing.T) {
 		p, ok := v.(payload)
 		assert.True(t, ok)
 		assert.Equal(t, 204, p.Status)
+
 		return false
 	}
 
 	var out1 payload
+
 	err := cache.CacheStruct(t.Context(), "skip-cache-struct", time.Second, func(_ context.Context) (any, error) {
 		return payload{Status: 204}, nil
 	}, &out1, WithShouldCache(predicate))
@@ -206,6 +209,7 @@ func TestCacheStruct_WithShouldCache_ReceivesStructValue(t *testing.T) {
 	assert.Equal(t, payload{Status: 204}, out1)
 
 	var out2 payload
+
 	err = cache.CacheStruct(t.Context(), "skip-cache-struct", time.Second, func(_ context.Context) (any, error) {
 		return payload{Status: 204}, nil
 	}, &out2, WithShouldCache(predicate))
