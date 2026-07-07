@@ -402,6 +402,22 @@ func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T)
 	})
 }
 
+func TestCache_AlreadyCanceledContextReturnsWithoutStartingWork(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := cache.Cache(ctx, "already-canceled", time.Second, func(_ context.Context) ([]byte, error) {
+		t.Fatal("generator should not start for already canceled context")
+		return nil, nil
+	})
+
+	assert.Nil(t, result)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 func TestCache_WithTimeout_DecouplesWorkFromCallerContext(t *testing.T) {
 	type ctxKey string
 
