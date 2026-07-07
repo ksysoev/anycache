@@ -274,9 +274,9 @@ func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string,
 		return nil, err
 	}
 
-	// Note we should run single flight always as decoupled context
-	// that single request cancelation didn't affect other requests for the same key.
-	// So we should use c.ctx instead of ctx here.
+	// Note: singleflight work should always run with a decoupled context
+	// so that one caller cancellation doesn't affect other requests for the same key.
+	// Use c.ctx (the cache base context) instead of the caller ctx here.
 	res := c.sf.DoChan(key, func() (value any, err error) {
 		reqLocal := req
 		if reqLocal.Timeout <= 0 {
