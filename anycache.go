@@ -58,7 +58,7 @@ type Cache struct {
 
 type Request struct {
 	MetricHook  func(key string, op State, latency time.Duration)
-	shouldCache func([]byte) bool
+	shouldCache func(any) bool
 	TTL         time.Duration
 	WarmUpTTL   time.Duration
 	Timeout     time.Duration
@@ -97,17 +97,34 @@ func New(store CacheStorage, opts ...CacheOptions) *Cache {
 // opts can customize request behavior (for example warm-up, timeout,
 // or per-request metrics).
 func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, generator CacheGenerator, opts ...CacheItemOptions) ([]byte, error) {
-	if ttl <= 0 {
-		return nil, errors.New("ttl must be greater than zero")
-	}
-
-	req := Request{
+	req := &Request{
 		TTL:        ttl,
 		MetricHook: c.observer,
 	}
 
 	for _, opt := range opts {
-		opt(&req)
+		opt(req)
+	}
+
+	gen := func(ctx context.Context) ([]byte, bool, error) {
+		res, err := generator(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if req.shouldCache != nil && !req.shouldCache(res) {
+			return res, false, err
+		}
+
+		return res, true, nil
+	}
+
+	return c.cache(ctx, key, gen, req)
+}
+
+func (c *Cache) cache(ctx context.Context, key string, gen generator, req *Request) ([]byte, error) {
+	if req.TTL <= 0 {
+		return nil, errors.New("ttl must be greater than zero")
 	}
 
 	state := CacheError
@@ -127,18 +144,6 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 	// appending common key prefix after  Metrics hook, to simplify key parsing for observability
 	key = c.keyPrefix + key
-	gen := func(ctx context.Context) ([]byte, bool, error) {
-		res, err := generator(ctx)
-		if err != nil {
-			return nil, false, err
-		}
-
-		if req.shouldCache != nil && !req.shouldCache(res) {
-			return res, false, err
-		}
-
-		return res, true, nil
-	}
 
 	var (
 		val *result
@@ -162,16 +167,29 @@ func (c *Cache) Cache(ctx context.Context, key string, ttl time.Duration, genera
 
 // CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
 func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, generator CacheGeneratorS, opts ...CacheItemOptions) (string, error) {
-	generatorWrapper := func(ctx context.Context) ([]byte, error) {
-		result, err := generator(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		return []byte(result), nil
+	req := &Request{
+		TTL:        ttl,
+		MetricHook: c.observer,
 	}
 
-	val, err := c.Cache(ctx, key, ttl, generatorWrapper, opts...)
+	for _, opt := range opts {
+		opt(req)
+	}
+
+	generatorWrapper := func(ctx context.Context) ([]byte, bool, error) {
+		res, err := generator(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+
+		if req.shouldCache != nil && !req.shouldCache(res) {
+			return []byte(res), false, err
+		}
+
+		return []byte(res), true, nil
+	}
+
+	val, err := c.cache(ctx, key, generatorWrapper, req)
 	if err != nil {
 		return "", err
 	}
@@ -184,21 +202,34 @@ func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, gener
 // result must be a pointer that can be unmarshaled into.
 // ttl must be greater than zero.
 func (c *Cache) CacheStruct(ctx context.Context, key string, ttl time.Duration, generator func(context.Context) (any, error), result any, opts ...CacheItemOptions) error {
-	generatorWrapper := func(ctx context.Context) ([]byte, error) {
+	req := &Request{
+		TTL:        ttl,
+		MetricHook: c.observer,
+	}
+
+	for _, opt := range opts {
+		opt(req)
+	}
+
+	generatorWrapper := func(ctx context.Context) ([]byte, bool, error) {
 		val, err := generator(ctx)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		data, err := c.codec.Encode(val)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
-		return data, nil
+		if req.shouldCache != nil && !req.shouldCache(val) {
+			return data, false, err
+		}
+
+		return data, true, nil
 	}
 
-	val, err := c.Cache(ctx, key, ttl, generatorWrapper, opts...)
+	val, err := c.cache(ctx, key, generatorWrapper, req)
 	if err != nil {
 		return err
 	}
@@ -269,7 +300,7 @@ func (c *Cache) Close() error {
 }
 
 // processRequestWithDeDuplication processes a cache request for the given key using the provided generator function and request options.
-func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req Request) (*result, error) {
+func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req *Request) (*result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -309,7 +340,7 @@ func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string,
 }
 
 // processRequest processes a cache request for the given key using the provided generator function and request options.
-func (c *Cache) processRequest(ctx context.Context, key string, generator generator, req Request) (value *result, err error) {
+func (c *Cache) processRequest(ctx context.Context, key string, generator generator, req *Request) (value *result, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("cache.Cache panicked: %v", r)
@@ -380,7 +411,7 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 
 // startWarmUp starts a background goroutine to warm up the cache for the given key
 // using the provided generator function and request options.
-func (c *Cache) startWarmUp(key string, generator generator, req Request) {
+func (c *Cache) startWarmUp(key string, generator generator, req *Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
 

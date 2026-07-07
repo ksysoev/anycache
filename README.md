@@ -115,6 +115,7 @@ if err := cache.Invalidate(ctx, "user:profile"); err != nil {
 - `WithWarmUpTTL(d)` — if remaining TTL is below `d`, serve current value and refresh in background.
 - `WithMetric(hook)` — override metric hook for one call.
 - `WithTimeout(d)` — timeout for internal storage + generation work.
+- `WithShouldCache(func(any) bool)` — decide per result whether to persist generated data.
 
 Metric states: `hit`, `miss`, `warm_up`, `error`.
 
@@ -125,6 +126,7 @@ Metric states: `hit`, `miss`, `warm_up`, `error`.
 - **Warm-up lock semantics:** only one warm-up refresh per key is started at a time; concurrent requests do not start duplicate warm-up goroutines.
 - **Context model for deduplicated requests:** singleflight-backed requests run storage/generator work on the cache base context (default or `WithBaseContext`) so one caller cancellation does not abort shared work for the same key.
 - **Timeout behavior (`WithTimeout` + caller deadlines):** `WithTimeout` sets an explicit timeout for internal work. If no explicit timeout is set and the initiating caller context has a deadline, that deadline is mirrored as an internal timeout for the shared work.
+- **Conditional caching (`WithShouldCache`):** the predicate receives the original generator value type used by the API call (`[]byte` for `Cache`, `string` for `CacheS`, and the original struct/object for `CacheStruct`). Return `false` to skip storing while still returning generated data.
 - **Caller cancellation expectations:** caller cancellation still stops waiting for that caller, but internal shared work continues on the cache base context.
 - **Lifecycle (`Close`):** call `Close()` during shutdown to cancel background work and wait for in-flight warm-up goroutines to finish.
 

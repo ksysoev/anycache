@@ -87,11 +87,11 @@ func TestCache_WithShouldCache_SkipsStorageSet(t *testing.T) {
 		return []byte(fmt.Sprintf("generated-%d", call)), nil
 	}
 
-	first, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+	first, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func(any) bool { return false }))
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("generated-1"), first)
 
-	second, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+	second, err := cache.Cache(t.Context(), "skip-cache", time.Second, generator, WithShouldCache(func(any) bool { return false }))
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("generated-2"), second)
 
@@ -125,7 +125,7 @@ func TestCache_WithShouldCache_DisablesSingleflight(t *testing.T) {
 
 	for range 2 {
 		go func() {
-			val, err := cache.Cache(t.Context(), "skip-cache-concurrent", time.Second, generator, WithShouldCache(func([]byte) bool { return false }))
+			val, err := cache.Cache(t.Context(), "skip-cache-concurrent", time.Second, generator, WithShouldCache(func(any) bool { return false }))
 			results <- val
 
 			errs <- err
@@ -148,6 +148,74 @@ func TestCache_WithShouldCache_DisablesSingleflight(t *testing.T) {
 	actual := []string{string(<-results), string(<-results)}
 	assert.ElementsMatch(t, []string{"generated-1", "generated-2"}, actual)
 	assert.Equal(t, int32(2), generatorCalls.Load(), "expected generator to run twice without singleflight de-duplication")
+}
+
+func TestCacheS_WithShouldCache_ReceivesStringValue(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "skip-cache-string").Return(nil, ErrKeyNotExists).Twice()
+
+	predicateCalls := 0
+	predicate := func(v any) bool {
+		predicateCalls++
+		str, ok := v.(string)
+		assert.True(t, ok)
+		assert.Equal(t, "generated", str)
+
+		return false
+	}
+
+	v1, err := cache.CacheS(t.Context(), "skip-cache-string", time.Second, func(_ context.Context) (string, error) {
+		return "generated", nil
+	}, WithShouldCache(predicate))
+	assert.NoError(t, err)
+	assert.Equal(t, "generated", v1)
+
+	v2, err := cache.CacheS(t.Context(), "skip-cache-string", time.Second, func(_ context.Context) (string, error) {
+		return "generated", nil
+	}, WithShouldCache(predicate))
+	assert.NoError(t, err)
+	assert.Equal(t, "generated", v2)
+	assert.Equal(t, 2, predicateCalls)
+}
+
+func TestCacheStruct_WithShouldCache_ReceivesStructValue(t *testing.T) {
+	type payload struct {
+		Status int
+	}
+
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "skip-cache-struct").Return(nil, ErrKeyNotExists).Twice()
+
+	predicateCalls := 0
+	predicate := func(v any) bool {
+		predicateCalls++
+		p, ok := v.(payload)
+		assert.True(t, ok)
+		assert.Equal(t, 204, p.Status)
+
+		return false
+	}
+
+	var out1 payload
+
+	err := cache.CacheStruct(t.Context(), "skip-cache-struct", time.Second, func(_ context.Context) (any, error) {
+		return payload{Status: 204}, nil
+	}, &out1, WithShouldCache(predicate))
+	assert.NoError(t, err)
+	assert.Equal(t, payload{Status: 204}, out1)
+
+	var out2 payload
+
+	err = cache.CacheStruct(t.Context(), "skip-cache-struct", time.Second, func(_ context.Context) (any, error) {
+		return payload{Status: 204}, nil
+	}, &out2, WithShouldCache(predicate))
+	assert.NoError(t, err)
+	assert.Equal(t, payload{Status: 204}, out2)
+	assert.Equal(t, 2, predicateCalls)
 }
 
 func TestCacheMetricHook_WarmUp(t *testing.T) {
