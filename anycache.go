@@ -270,15 +270,25 @@ func (c *Cache) Close() error {
 
 // processRequestWithDeDuplication processes a cache request for the given key using the provided generator function and request options.
 func (c *Cache) processRequestWithDeDuplication(ctx context.Context, key string, generator generator, req Request) (*result, error) {
-	if deadline, ok := ctx.Deadline(); ok && req.Timeout <= 0 {
-		req.Timeout = time.Until(deadline)
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 
 	// Note we should run single flight always as decoupled context
 	// that single request cancelation didn't affect other requests for the same key.
 	// So we should use c.ctx instead of ctx here.
 	res := c.sf.DoChan(key, func() (value any, err error) {
-		return c.processRequest(c.ctx, key, generator, req)
+		reqLocal := req
+		if reqLocal.Timeout <= 0 {
+			if deadline, ok := ctx.Deadline(); ok {
+				reqLocal.Timeout = time.Until(deadline)
+				if reqLocal.Timeout <= 0 {
+					return nil, context.DeadlineExceeded
+				}
+			}
+		}
+
+		return c.processRequest(c.ctx, key, generator, reqLocal)
 	})
 
 	select {
