@@ -368,6 +368,7 @@ func TestCache_DefaultContextCancellationPropagation_NoWithTimeout(t *testing.T)
 		store.EXPECT().Get(mock.Anything, "ctx-deadline").Return(nil, ErrKeyNotExists)
 
 		type ctxKey string
+
 		const key ctxKey = "request-id"
 
 		ctx, cancel := context.WithTimeout(context.WithValue(context.Background(), key, "req-123"), 100*time.Millisecond)
