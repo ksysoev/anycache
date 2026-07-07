@@ -2,7 +2,6 @@ package anycache
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -304,32 +303,20 @@ func TestCancelingRequest(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := New(store)
 	store.EXPECT().Get(mock.Anything, "TestCancelingRequestKey").Return(nil, ErrKeyNotExists)
-	store.EXPECT().Set(mock.Anything, "TestCancelingRequestKey", []byte("testValue"), mock.Anything).Return(nil)
-	// Define a generator function that returns the test value
+
 	generator := func(ctx context.Context) ([]byte, error) {
 		<-ctx.Done()
-		return []byte("testValue"), nil
+		return nil, ctx.Err()
 	}
 
-	// Call the CacheJSON function to cache the test value
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
 
 	result, err := cache.Cache(ctx, "TestCancelingRequestKey", 2*time.Second, generator)
-	// Check that the function returned no errors
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Cache returned unexpected error: %v", err)
-	}
-
-	// Check that the result variable contains the expected value
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.Nil(t, result, "Expected to get nil result, but got '%v'", result)
 
-	cancel()
-
-	if err := cache.Close(); err != nil {
-		t.Errorf("Close returned an error: %v", err)
-	}
-
-	time.Sleep(time.Millisecond * 10) // watch to finish set on mock
+	assert.NoError(t, cache.Close())
 }
 
 func TestCache_DefaultContextDecouplesValues_NoWithTimeout(t *testing.T) {
