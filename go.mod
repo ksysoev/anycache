@@ -8,7 +8,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	go.mongodb.org/mongo-driver/v2 v2.8.0
-	golang.org/x/sync v0.21.0
+	golang.org/x/sync v0.22.0
 	google.golang.org/protobuf v1.36.11
 )
 
