@@ -37,7 +37,7 @@ func TestGetRequestKey(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(tt.method, tt.path+"?q=1", nil)
+			req := httptest.NewRequest(tt.method, tt.path+"?q=1", http.NoBody)
 			assert.Equal(t, tt.want, getRequestKey(req))
 		})
 	}
@@ -47,22 +47,24 @@ func TestMiddlewareCachesGetResponses(t *testing.T) {
 	middleware := newTestMiddleware(t)
 
 	var calls atomic.Int32
+
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
+
 		w.Header().Set("X-Cacheable", "yes")
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte("response-" + string(rune('0'+call))))
+		_, _ = w.Write([]byte("response-" + string('0'+call)))
 	}))
 
 	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/articles", nil))
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/articles", http.NoBody))
 
 	assert.Equal(t, http.StatusCreated, first.Code)
 	assert.Equal(t, "yes", first.Header().Get("X-Cacheable"))
 	assert.Equal(t, "response-1", first.Body.String())
 
 	second := httptest.NewRecorder()
-	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/articles", nil))
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/articles", http.NoBody))
 
 	assert.Equal(t, int32(1), calls.Load())
 	assert.Equal(t, http.StatusCreated, second.Code)
@@ -74,16 +76,17 @@ func TestMiddlewareBypassesNonGetRequests(t *testing.T) {
 	middleware := newTestMiddleware(t)
 
 	var calls atomic.Int32
+
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		call := calls.Add(1)
-		_, _ = w.Write([]byte("response-" + string(rune('0'+call))))
+		_, _ = w.Write([]byte("response-" + string('0'+call)))
 	}))
 
 	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/articles", nil))
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodPost, "/articles", http.NoBody))
 
 	second := httptest.NewRecorder()
-	handler.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/articles", nil))
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodPost, "/articles", http.NoBody))
 
 	assert.Equal(t, int32(2), calls.Load())
 	assert.Equal(t, "response-1", first.Body.String())
@@ -94,15 +97,16 @@ func TestMiddlewareDefaultsEmptyResponseToStatusOK(t *testing.T) {
 	middleware := newTestMiddleware(t)
 
 	var calls atomic.Int32
+
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 	}))
 
 	first := httptest.NewRecorder()
-	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/empty", nil))
+	handler.ServeHTTP(first, httptest.NewRequest(http.MethodGet, "/empty", http.NoBody))
 
 	second := httptest.NewRecorder()
-	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/empty", nil))
+	handler.ServeHTTP(second, httptest.NewRequest(http.MethodGet, "/empty", http.NoBody))
 
 	assert.Equal(t, int32(1), calls.Load())
 	assert.Equal(t, http.StatusOK, first.Code)

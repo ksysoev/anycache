@@ -11,16 +11,16 @@ import (
 )
 
 type responseWriter struct {
-	hasWritten bool
 	header     http.Header
-	statusCode int
 	body       bytes.Buffer
+	statusCode int
+	hasWritten bool
 }
 
 type cachedResponse struct {
 	Header     http.Header `json:"header"`
-	StatusCode int         `json:"status_code"`
 	Body       []byte      `json:"body"`
+	StatusCode int         `json:"status_code"`
 }
 
 func newResponseWriter() *responseWriter {
@@ -62,6 +62,7 @@ func NewMiddleware(c *anycache.Cache) func(http.Handler) http.Handler {
 			}
 
 			var res cachedResponse
+
 			err := c.CacheStruct(r.Context(), key, time.Minute, func(ctx context.Context) (any, error) {
 				resWriter := newResponseWriter()
 				next.ServeHTTP(resWriter, r)
