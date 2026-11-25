@@ -24,6 +24,8 @@ func WithMetric(hook func(key string, op State, latency time.Duration)) CacheIte
 // WithTimeout sets an explicit timeout for internal cache work (storage + generation).
 // Internal shared work uses the cache base context (see WithBaseContext);
 // caller cancellation/context values are decoupled from storage/generator execution.
+// Storing a generated value gets its own timeout budget, so a slow generator
+// does not leave the storage write without time.
 func WithTimeout(timeout time.Duration) CacheItemOptions {
 	return func(req *Request) {
 		req.Timeout = timeout

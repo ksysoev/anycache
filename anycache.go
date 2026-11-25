@@ -290,8 +290,12 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
+//
+// The generator runs on ctx. The value is stored on a context derived from base
+// with a fresh req.Timeout budget, so a generator that used most of its own
+// budget still leaves the storage write enough time to succeed.
 // When req.ignoreSetError is set, a storage failure is logged and the value is returned without error.
-func (c *Cache) generateAndSet(ctx context.Context, key string, req *Request, gen generator) ([]byte, error) {
+func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Request, gen generator) ([]byte, error) {
 	value, cacheable, err := gen(ctx)
 	if err != nil {
 		return value, err
@@ -303,7 +307,10 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, req *Request, ge
 
 	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
-	err = c.Storage.Set(ctx, key, value, ttl)
+	storeCtx, cancel := withOptionalTimeout(base, req.Timeout)
+	defer cancel()
+
+	err = c.Storage.Set(storeCtx, key, value, ttl)
 
 	switch {
 	case err == nil:
@@ -314,6 +321,16 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, req *Request, ge
 	default:
 		return value, err
 	}
+}
+
+// withOptionalTimeout returns a context derived from ctx that times out after
+// timeout, or ctx itself when timeout is not positive.
+func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, timeout)
 }
 
 // randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
@@ -390,12 +407,10 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 		}
 	}()
 
-	if req.Timeout > 0 {
-		var cancel context.CancelFunc
+	base := ctx
 
-		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
-	}
+	ctx, cancel := withOptionalTimeout(base, req.Timeout)
+	defer cancel()
 
 	var (
 		sfState            State
@@ -431,7 +446,7 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 	case errors.Is(err, ErrKeyNotExists):
 		sfState = CacheMiss
 
-		data, err = c.generateAndSet(ctx, key, req, generator)
+		data, err = c.generateAndSet(ctx, base, key, req, generator)
 		if err != nil {
 			return nil, err
 		}
@@ -457,16 +472,10 @@ func (c *Cache) startWarmUp(key string, generator generator, req *Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
 
-		ctx := c.ctx
+		ctx, cancel := withOptionalTimeout(c.ctx, req.Timeout)
+		defer cancel()
 
-		if req.Timeout > 0 {
-			var cancel context.CancelFunc
-
-			ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-			defer cancel()
-		}
-
-		_, err := c.generateAndSet(ctx, key, req, generator)
+		_, err := c.generateAndSet(ctx, c.ctx, key, req, generator)
 		if err != nil {
 			slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 		}

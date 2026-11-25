@@ -251,3 +251,35 @@ func TestCache_SetErrorIsStillReturned(t *testing.T) {
 
 	assert.ErrorIs(t, err, assert.AnError)
 }
+
+func TestCacheC_StoreGetsFreshTimeout(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	const timeout = 50 * time.Millisecond
+
+	store.EXPECT().Get(mock.Anything, "key").Return(nil, ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Second).
+		RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ time.Duration) error {
+			deadline, ok := ctx.Deadline()
+
+			assert.NoError(t, ctx.Err(), "store must not inherit the exhausted generator budget")
+			assert.True(t, ok, "store must still be bounded by the timeout")
+			assert.Greater(t, time.Until(deadline), timeout/2)
+
+			return nil
+		}).Once()
+
+	//nolint:unparam // generator signature requires an error result
+	gen := func(ctx context.Context) ([]byte, bool, error) {
+		// Use up the whole budget, like a handler finishing right at its deadline.
+		<-ctx.Done()
+
+		return []byte("value"), true, nil
+	}
+
+	val, err := cache.CacheC(t.Context(), "key", time.Second, gen, WithTimeout(timeout))
+
+	require.NoError(t, err)
+	assert.Equal(t, []byte("value"), val)
+}
