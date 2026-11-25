@@ -109,7 +109,14 @@ func WithMaxBodySize(n int) Option {
 }
 
 // WithTimeout bounds storage access and handler execution on a cache miss.
-// The handler context is cancelled when it expires. Zero or less disables the timeout.
+//
+// If storage access times out, the request fails open and is served by the
+// handler directly. If the handler is still running when the timeout expires,
+// its context is cancelled, its output is discarded and the requests waiting for
+// the response get 504 Gateway Timeout (503 when the cache is closing).
+//
+// Zero or less disables the middleware timeout; the shared work is then bounded
+// by the context deadline of the request that started it, if it has one.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d
@@ -154,7 +161,8 @@ func WithRespectRequestNoCache() Option {
 	}
 }
 
-// WithLogger sets the logger used for fail-open and panic events. Defaults to slog.Default().
+// WithLogger sets the logger used for fail-open, panic and timeout events. Defaults to slog.Default().
+// Failures to store a response are logged by anycache itself via slog.Default().
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *config) {
 		if logger != nil {

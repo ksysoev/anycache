@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -55,21 +56,47 @@ func (m *Middleware) key(r *http.Request) (string, bool) {
 	return keyPrefix + hex.EncodeToString(sum[:]), true
 }
 
-// defaultKey returns "METHOD\nhost\npath\nsorted-query" for r.
+// defaultKey returns "METHOD\nscheme\nhost\npath\nquery" for r.
+// The scheme is "https" when the request arrived over TLS and "http" otherwise.
 func defaultKey(r *http.Request) string {
 	var b strings.Builder
 
 	b.WriteString(r.Method)
 	b.WriteByte('\n')
+
+	if r.TLS != nil {
+		b.WriteString("https")
+	} else {
+		b.WriteString("http")
+	}
+
+	b.WriteByte('\n')
 	b.WriteString(r.Host)
 	b.WriteByte('\n')
 	b.WriteString(r.URL.EscapedPath())
 	b.WriteByte('\n')
-
-	if r.URL.RawQuery != "" {
-		// Encode sorts by key, making the key independent of parameter order.
-		b.WriteString(r.URL.Query().Encode())
-	}
+	writeQuery(&b, r.URL.RawQuery)
 
 	return b.String()
+}
+
+// writeQuery writes the query sorted by key so that parameter order does not
+// matter. A query that does not parse cleanly (invalid escapes, semicolons) is
+// written verbatim, because parsing would silently drop the invalid pairs and
+// make different queries share a key.
+func writeQuery(b *strings.Builder, rawQuery string) {
+	if rawQuery == "" {
+		return
+	}
+
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		b.WriteString("raw:")
+		b.WriteString(rawQuery)
+
+		return
+	}
+
+	b.WriteString("q:")
+	b.WriteString(values.Encode())
 }

@@ -1,6 +1,7 @@
 package httpcache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -389,6 +391,7 @@ func (h *blockingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type fetched struct {
 	body    string
 	cookies []*http.Cookie
+	status  int
 }
 
 // runConcurrent starts a leader, waits for it to enter the handler, then starts
@@ -396,7 +399,9 @@ type fetched struct {
 func runConcurrent(t *testing.T, h http.Handler, bh *blockingHandler, followers int) []*fetched {
 	t.Helper()
 
-	srv := httptest.NewServer(h)
+	gate := &entryGate{}
+
+	srv := httptest.NewServer(gate.wrap(h))
 	t.Cleanup(srv.Close)
 
 	results := make([]*fetched, followers+1)
@@ -419,7 +424,7 @@ func runConcurrent(t *testing.T, h http.Handler, bh *blockingHandler, followers 
 		body, err := io.ReadAll(resp.Body)
 		assert.NoError(t, err)
 
-		results[i] = &fetched{body: string(body), cookies: resp.Cookies()}
+		results[i] = &fetched{body: string(body), cookies: resp.Cookies(), status: resp.StatusCode}
 	}
 
 	wg.Go(func() { fetch(0) })
@@ -430,7 +435,7 @@ func runConcurrent(t *testing.T, h http.Handler, bh *blockingHandler, followers 
 		wg.Go(func() { fetch(i) })
 	}
 
-	time.Sleep(50 * time.Millisecond)
+	gate.wait(t, followers+1)
 	close(bh.release)
 	wg.Wait()
 
@@ -476,37 +481,145 @@ func TestMiddleware_PrivateResponsesAreNotShared(t *testing.T) {
 	}
 }
 
+// joinGrace covers the few instructions between a request entering the
+// middleware and joining the in-flight cache call: singleflight exposes no
+// waiter count to wait on.
+const joinGrace = 10 * time.Millisecond
+
+// entryGate counts requests entering the handler under test.
+type entryGate struct {
+	entered atomic.Int32
+}
+
+func (g *entryGate) wrap(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.entered.Add(1)
+		h.ServeHTTP(w, r)
+	})
+}
+
+// wait blocks until n requests entered the handler and had time to join the in-flight call.
+func (g *entryGate) wait(t *testing.T, n int) {
+	t.Helper()
+
+	require.Eventually(t, func() bool { return g.entered.Load() >= int32(n) }, 5*time.Second, time.Millisecond) //nolint:gosec // small test counts
+	time.Sleep(joinGrace)
+}
+
+// serveWithCancelledLeader sends a leader request and, once the handler started,
+// a follower. When the follower is waiting, the leader is cancelled, then release
+// is called and both responses are returned.
+func serveWithCancelledLeader(t *testing.T, h http.Handler, started <-chan struct{}, release func()) (leader, follower *httptest.ResponseRecorder) {
+	t.Helper()
+
+	gate := &entryGate{}
+	h = gate.wrap(h)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	leaderDone := make(chan *httptest.ResponseRecorder)
+	followerDone := make(chan *httptest.ResponseRecorder)
+
+	go func() { leaderDone <- do(h, get("/p").WithContext(ctx)) }()
+
+	<-started
+
+	go func() { followerDone <- do(h, get("/p")) }()
+
+	gate.wait(t, 2)
+	cancel()
+
+	leader = <-leaderDone
+
+	release()
+
+	return leader, <-followerDone
+}
+
 func TestMiddleware_LeaderCancellation(t *testing.T) {
 	bh := newBlockingHandler(false)
 	h := newHandler(t, newMemoryCache(t), bh)
 
-	ctx, cancel := context.WithCancel(t.Context())
+	leader, follower := serveWithCancelledLeader(t, h, bh.started, func() { close(bh.release) })
 
-	leaderDone := make(chan *httptest.ResponseRecorder)
-
-	go func() {
-		leaderDone <- do(h, get("/p").WithContext(ctx))
-	}()
-
-	<-bh.started
-
-	followerDone := make(chan *httptest.ResponseRecorder)
-
-	go func() {
-		followerDone <- do(h, get("/p"))
-	}()
-
-	time.Sleep(20 * time.Millisecond)
-	cancel()
-
-	leader := <-leaderDone
 	assert.Empty(t, leader.Body.String(), "cancelled leader gets no response")
-
-	close(bh.release)
-
-	follower := <-followerDone
 	assert.Equal(t, "body-1", follower.Body.String())
 	assert.Equal(t, int32(1), bh.calls.Load())
+}
+
+func TestMiddleware_FailureLoggedWhenLeaderIsGone(t *testing.T) {
+	tests := []struct {
+		handler  func(started chan struct{}, release chan struct{}) http.Handler
+		name     string
+		wantLog  string
+		opts     []Option
+		wantCode int
+	}{
+		{
+			name: "panic",
+			handler: func(started, release chan struct{}) http.Handler {
+				return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					close(started)
+					<-release
+					panic("boom")
+				})
+			},
+			wantCode: http.StatusInternalServerError,
+			wantLog:  "handler panicked",
+		},
+		{
+			name: "timeout",
+			handler: func(started, _ chan struct{}) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					close(started)
+					<-r.Context().Done()
+
+					_, _ = w.Write([]byte("partial"))
+				})
+			},
+			opts:     []Option{WithTimeout(500 * time.Millisecond)},
+			wantCode: http.StatusGatewayTimeout,
+			wantLog:  "handler did not finish in time",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := &syncBuffer{}
+			started := make(chan struct{})
+			release := make(chan struct{})
+
+			opts := append([]Option{WithLogger(slog.New(slog.NewTextHandler(logs, nil)))}, tt.opts...)
+			h := newHandler(t, newMemoryCache(t), tt.handler(started, release), opts...)
+
+			_, follower := serveWithCancelledLeader(t, h, started, func() { close(release) })
+
+			assert.Equal(t, tt.wantCode, follower.Code)
+			assert.Equal(t, 1, strings.Count(logs.String(), tt.wantLog), "failure must be logged exactly once")
+		})
+	}
+}
+
+func TestMiddleware_PanicAfterDeadlineIsTimeout(t *testing.T) {
+	logs := &syncBuffer{}
+
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+		panic("nil result")
+	})
+
+	h := newHandler(t, newMemoryCache(t), handler,
+		WithTimeout(50*time.Millisecond),
+		WithLogger(slog.New(slog.NewTextHandler(logs, nil))),
+	)
+
+	w := do(h, get("/p"))
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+	assert.Contains(t, logs.String(), "handler did not finish in time")
+	assert.Contains(t, logs.String(), "nil result")
+	assert.NotContains(t, logs.String(), "handler panicked")
 }
 
 func TestMiddleware_WarmUp(t *testing.T) {
@@ -574,38 +687,136 @@ func TestMiddleware_Invalidate(t *testing.T) {
 }
 
 func TestMiddleware_TTLFunc(t *testing.T) {
-	cache := &recordingCache{}
+	tests := []struct {
+		name    string
+		path    string
+		wantTTL time.Duration
+	}{
+		{name: "custom ttl", path: "/short", wantTTL: time.Second},
+		{name: "non-positive falls back to default", path: "/default", wantTTL: time.Minute},
+	}
 
-	mw, err := New(cache, time.Minute, WithTTLFunc(func(r *http.Request) time.Duration {
-		if r.URL.Path == "/short" {
-			return time.Second
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cache := NewMockCache(t)
+			cache.EXPECT().
+				CacheC(mock.Anything, mock.Anything, tt.wantTTL, mock.Anything, mock.Anything).
+				RunAndReturn(func(ctx context.Context, _ string, _ time.Duration, gen anycache.CacheGeneratorC, _ ...anycache.CacheItemOptions) ([]byte, error) {
+					data, _, err := gen(ctx)
+					return data, err
+				}).
+				Once()
 
-		return 0
-	}))
-	require.NoError(t, err)
+			mw, err := New(cache, time.Minute, WithTTLFunc(func(r *http.Request) time.Duration {
+				if r.URL.Path == "/short" {
+					return time.Second
+				}
 
-	h := mw.Handler(http.NotFoundHandler())
+				return 0
+			}))
+			require.NoError(t, err)
 
-	do(h, get("/short"))
-	do(h, get("/default"))
+			w := do(mw.Handler(http.NotFoundHandler()), get(tt.path))
 
-	assert.Equal(t, []time.Duration{time.Second, time.Minute}, cache.ttls)
+			assert.Equal(t, http.StatusNotFound, w.Code)
+		})
+	}
 }
 
-// recordingCache records TTLs and always runs the generator.
-type recordingCache struct {
-	ttls []time.Duration
+func TestMiddleware_SetFailureKeepsDeDuplication(t *testing.T) {
+	store := anycache.NewMockCacheStorage(t)
+	store.EXPECT().Get(mock.Anything, mock.Anything).Return(nil, anycache.ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errStorage).Once()
+
+	bh := newBlockingHandler(false)
+	h := newHandler(t, anycache.New(store), bh)
+
+	results := runConcurrent(t, h, bh, 4)
+
+	assert.Equal(t, int32(1), bh.calls.Load(), "followers must not rerun the handler when storing fails")
+
+	for _, res := range results {
+		require.NotNil(t, res)
+		assert.Equal(t, http.StatusOK, res.status)
+		assert.Equal(t, "body-1", res.body)
+	}
 }
 
-func (c *recordingCache) CacheC(ctx context.Context, _ string, ttl time.Duration, gen anycache.CacheGeneratorC, _ ...anycache.CacheItemOptions) ([]byte, error) {
-	c.ttls = append(c.ttls, ttl)
+func TestMiddleware_TimedOutResponseIsDiscarded(t *testing.T) {
+	store := anycache.NewMockCacheStorage(t)
+	store.EXPECT().Get(mock.Anything, mock.Anything).Return(nil, anycache.ErrKeyNotExists).Once()
+	// no Set expectation: a timed out response must never be stored
 
-	data, _, err := gen(ctx)
+	var calls atomic.Int32
 
-	return data, err
+	started := make(chan struct{})
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		close(started)
+
+		<-r.Context().Done()
+
+		_, _ = w.Write([]byte(`{"partial":`))
+	})
+
+	h := newHandler(t, anycache.New(store), handler, WithTimeout(100*time.Millisecond))
+
+	leader := make(chan *httptest.ResponseRecorder)
+	follower := make(chan *httptest.ResponseRecorder)
+
+	go func() { leader <- do(h, get("/p")) }()
+
+	<-started
+
+	go func() { follower <- do(h, get("/p")) }()
+
+	for _, w := range []*httptest.ResponseRecorder{<-leader, <-follower} {
+		assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+		assert.NotContains(t, w.Body.String(), "partial")
+	}
+
+	assert.Equal(t, int32(1), calls.Load())
 }
 
-func (*recordingCache) Invalidate(context.Context, string) error {
-	return nil
+// syncBuffer is a goroutine-safe log sink.
+type syncBuffer struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestMiddleware_PanicIsLoggedOnce(t *testing.T) {
+	logs := &syncBuffer{}
+	bh := newBlockingHandler(false)
+
+	panicking := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bh.ServeHTTP(w, r)
+		panic("boom")
+	})
+
+	h := newHandler(t, newMemoryCache(t), panicking, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+
+	results := runConcurrent(t, h, bh, 4)
+
+	for _, res := range results {
+		require.NotNil(t, res)
+		assert.Equal(t, http.StatusInternalServerError, res.status)
+	}
+
+	assert.Equal(t, int32(1), bh.calls.Load())
+	assert.Equal(t, 1, strings.Count(logs.String(), "handler panicked"))
 }

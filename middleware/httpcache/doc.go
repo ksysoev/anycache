@@ -36,14 +36,34 @@
 // conditional headers (If-None-Match, If-Modified-Since, ...), so it always
 // produces a full response. Its context keeps the request values but is not
 // cancelled when the client disconnects; it is bounded by WithTimeout instead.
-// With WithWarmUpTTL the handler also runs in the background after the original
-// request has completed. Flush is a no-op and Hijack is unsupported, so routes
-// serving SSE or websockets must not use the middleware.
+// If the handler is still running when the timeout expires, whatever it wrote is
+// discarded, never stored, and the waiting requests get a 504 response (503 when
+// the cache is shutting down). A storage access that times out fails open.
+//
+// The handler may run after the request that triggered it has completed: during
+// a WithWarmUpTTL background refresh, or when that client disconnected while
+// other requests wait for the response. Request-scoped resources reachable
+// through the context (database transactions, pooled buffers, spans ended by an
+// outer middleware) may already be released by then and must not be used by
+// cached handlers; context values that stay valid (auth claims, request IDs,
+// loggers) are fine.
+//
+// # Streaming and memory
+//
+// Responses are buffered in memory until the handler returns: Flush is a no-op
+// and Hijack is unsupported, so routes serving SSE or websockets must not use
+// the middleware. WithMaxBodySize only controls whether a response is stored;
+// larger responses are still buffered in full, so do not wrap routes serving
+// large downloads or files.
 //
 // # Keys and invalidation
 //
-// The key covers the method, host, escaped path, sorted query and configured
-// vary headers, and is hashed so it is valid for every storage backend.
+// The key covers the method, scheme, host, escaped path, sorted query and
+// configured vary headers, and is hashed so it is valid for every storage
+// backend. The scheme is https only when the request arrived over TLS, so behind
+// a TLS-terminating proxy use WithVaryHeaders("X-Forwarded-Proto") or
+// WithKeyFunc to keep schemes apart. Queries that do not parse cleanly are
+// keyed verbatim.
 // Request headers that are not part of the key (for example X-Forwarded-Host)
 // must not influence the response. Middleware.Key returns the key of a request,
 // which can be passed to anycache.Cache.Invalidate.
@@ -51,5 +71,6 @@
 // Response compression should be applied outside the cache middleware;
 // otherwise add Accept-Encoding to the vary headers.
 //
-// Storage errors fail open: the request is served by the handler directly.
+// Storage errors fail open: when reading fails the request is served by the
+// handler directly, when storing fails the response is still served and shared.
 package httpcache

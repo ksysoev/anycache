@@ -102,7 +102,7 @@ func (m *Middleware) serve(w http.ResponseWriter, r *http.Request, next http.Han
 	defer func() { src.release(state != anycache.CacheHit) }()
 
 	slot := &leaderSlot{}
-	gen := m.generator(src, next, slot)
+	gen := m.generator(src, next, slot, key)
 
 	data, err := m.cache.CacheC(r.Context(), key, m.ttlFor(r), gen, m.cacheOptions(&state)...)
 	if err != nil {
@@ -126,7 +126,7 @@ func (m *Middleware) serve(w http.ResponseWriter, r *http.Request, next http.Han
 }
 
 // generator returns the cache generator running next on a detached copy of the request.
-func (m *Middleware) generator(src *requestSource, next http.Handler, slot *leaderSlot) anycache.CacheGeneratorC {
+func (m *Middleware) generator(src *requestSource, next http.Handler, slot *leaderSlot, key string) anycache.CacheGeneratorC {
 	return func(genCtx context.Context) ([]byte, bool, error) {
 		base := src.request()
 		if base == nil {
@@ -136,13 +136,11 @@ func (m *Middleware) generator(src *requestSource, next http.Handler, slot *lead
 		ctx, cancel := detach(base.Context(), genCtx)
 		defer cancel()
 
-		rec := newRecorder(m.cfg.maxBodySize)
-
-		if err := runHandler(next, rec, base.Clone(ctx)); err != nil {
+		resp, err := m.execute(ctx, next, base.Clone(ctx), key)
+		if err != nil {
 			return nil, false, err
 		}
 
-		resp := rec.result(time.Now())
 		slot.set(resp)
 
 		switch m.cfg.classify(resp) {
@@ -156,24 +154,70 @@ func (m *Middleware) generator(src *requestSource, next http.Handler, slot *lead
 	}
 }
 
+// execute runs next on r and records its response.
+//
+// Panics and handler overruns are returned as errors and logged here, exactly
+// once per handler execution: every request waiting for the response receives
+// the same error, and the request that triggered the execution may be gone.
+func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Request, key string) (*response, error) {
+	rec := newRecorder(m.cfg.maxBodySize)
+	pe := runHandler(next, rec, r)
+
+	switch {
+	case pe != nil && pe.value == http.ErrAbortHandler:
+		// Deliberate abort, handled like net/http does: not logged, re-panicked by every waiting request.
+		return nil, pe
+	case ctx.Err() != nil:
+		// A handler that outlived its context may have written a partial or error
+		// response, or panicked because of the cancellation: never serve, share or store it.
+		te := newTimeoutError(context.Cause(ctx))
+
+		attrs := []any{"key", key, "error", te.cause}
+		if pe != nil {
+			attrs = append(attrs, "panic", pe.value)
+		}
+
+		m.cfg.logger.Warn("httpcache: handler did not finish in time", attrs...)
+
+		return nil, te
+	case pe != nil:
+		m.cfg.logger.Error("httpcache: handler panicked", "key", key, "error", pe.value, "stack", string(pe.stack))
+		return nil, pe
+	default:
+		return rec.result(time.Now()), nil
+	}
+}
+
 // handleError responds when the cache call failed.
 func (m *Middleware) handleError(w http.ResponseWriter, r *http.Request, next http.Handler, slot *leaderSlot, key string, err error) {
-	var pe *panicError
+	var (
+		pe *panicError
+		te *timeoutError
+	)
 
 	switch {
 	case errors.As(err, &pe):
+		// An abort is shared on purpose: it signals a broken response (for example a
+		// failed upstream body copy in httputil.ReverseProxy) that every follower would get.
 		if pe.value == http.ErrAbortHandler {
 			panic(http.ErrAbortHandler)
 		}
 
-		m.cfg.logger.Error("httpcache: handler panicked", "key", key, "error", pe.value, "stack", string(pe.stack))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	case errors.As(err, &te):
+		code := http.StatusServiceUnavailable
+		if errors.Is(te.cause, context.DeadlineExceeded) {
+			code = http.StatusGatewayTimeout
+		}
+
+		http.Error(w, http.StatusText(code), code)
 	case r.Context().Err() != nil:
 		// The client is gone, nothing to respond to.
 	default:
 		if resp := slot.get(); resp != nil {
-			// The handler already ran for this request (e.g. storing failed), never run it twice.
-			m.cfg.logger.Warn("httpcache: failed to store response", "key", key, "error", err)
+			// Safety net: CacheC does not report storage write failures, but should
+			// the cache fail after the handler ran, never run it twice.
+			m.cfg.logger.Warn("httpcache: cache error after the handler ran", "key", key, "error", err)
 			m.writeRecorded(w, resp)
 
 			return
@@ -296,11 +340,11 @@ func age(createdAt time.Time) int {
 	return max(0, int(time.Since(createdAt)/time.Second))
 }
 
-// runHandler runs next, converting a panic into a *panicError.
-func runHandler(next http.Handler, w http.ResponseWriter, r *http.Request) (err error) {
+// runHandler runs next, returning a *panicError if it panicked and nil otherwise.
+func runHandler(next http.Handler, w http.ResponseWriter, r *http.Request) (pe *panicError) {
 	defer func() {
 		if v := recover(); v != nil {
-			err = &panicError{value: v, stack: debug.Stack()}
+			pe = newPanicError(v, debug.Stack())
 		}
 	}()
 
@@ -315,8 +359,31 @@ type panicError struct {
 	stack []byte
 }
 
+// newPanicError creates a panicError for a recovered value and its stack trace.
+func newPanicError(value any, stack []byte) *panicError {
+	return &panicError{value: value, stack: stack}
+}
+
 func (e *panicError) Error() string {
 	return fmt.Sprintf("httpcache: handler panicked: %v", e.value)
+}
+
+// timeoutError reports that the handler context ended before the handler returned.
+type timeoutError struct {
+	cause error
+}
+
+// newTimeoutError creates a timeoutError for the cause of the handler context cancellation.
+func newTimeoutError(cause error) *timeoutError {
+	return &timeoutError{cause: cause}
+}
+
+func (e *timeoutError) Error() string {
+	return fmt.Sprintf("httpcache: handler did not finish in time: %v", e.cause)
+}
+
+func (e *timeoutError) Unwrap() error {
+	return e.cause
 }
 
 // requestSource lazily prepares the request copy used by the generator.

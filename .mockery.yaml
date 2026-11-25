@@ -11,6 +11,11 @@ packages:
   github.com/ksysoev/anycache:
     interfaces:
       CacheStorage:
+  github.com/ksysoev/anycache/middleware/httpcache:
+    interfaces:
+      Cache:
+        config:
+          unroll-variadic: false
   github.com/ksysoev/anycache/storage/memcache:
     interfaces:
       MemCached:

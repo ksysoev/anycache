@@ -47,6 +47,7 @@ func TestMiddleware_Key(t *testing.T) {
 		{name: "query order", target: "http://example.com/p?b=2&a=1", same: true},
 		{name: "unkeyed header", target: "http://example.com/p?a=1&b=2", header: http.Header{"Accept-Language": {"de"}}, same: true},
 		{name: "other host", target: "http://other.com/p?a=1&b=2"},
+		{name: "other scheme", target: "https://example.com/p?a=1&b=2"},
 		{name: "other path", target: "http://example.com/q?a=1&b=2"},
 		{name: "other query", target: "http://example.com/p?a=1&b=3"},
 		{name: "vary header", target: "http://example.com/p?a=1&b=2", header: http.Header{"Accept": {"application/json"}}},
@@ -115,4 +116,40 @@ func TestMiddleware_Key_CustomKeyFunc(t *testing.T) {
 	assert.True(t, ok1)
 	assert.True(t, ok2)
 	assert.Equal(t, k1, k2)
+}
+
+func TestMiddleware_Key_Query(t *testing.T) {
+	mw := newTestMiddleware(t)
+
+	key := func(target string) string {
+		k, ok := mw.Key(httptest.NewRequest(http.MethodGet, target, http.NoBody))
+		require.True(t, ok)
+
+		return k
+	}
+
+	tests := []struct {
+		name string
+		a    string
+		b    string
+		same bool
+	}{
+		{name: "parameter order", a: "/s?b=2&a=1", b: "/s?a=1&b=2", same: true},
+		{name: "repeated values keep order", a: "/s?a=1&a=2", b: "/s?a=2&a=1"},
+		{name: "semicolon is not dropped", a: "/s?q=1;x=evil", b: "/s"},
+		{name: "semicolon differs from empty query", a: "/s?q=1;x=evil", b: "/s?"},
+		{name: "invalid escape is not dropped", a: "/s?q=%zz", b: "/s"},
+		{name: "raw query cannot collide with parsed", a: "/s?q=1;x=2", b: "/s?q=1%3Bx%3D2"},
+		{name: "different invalid queries", a: "/s?q=%zz", b: "/s?q=%yy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.same {
+				assert.Equal(t, key(tt.a), key(tt.b))
+			} else {
+				assert.NotEqual(t, key(tt.a), key(tt.b))
+			}
+		})
+	}
 }

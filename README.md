@@ -68,7 +68,7 @@ func main() {
 - `Cache(ctx, key, ttl, generator, opts...) ([]byte, error)` for raw `[]byte`
 - `CacheS(ctx, key, ttl, generator, opts...) (string, error)` for string values
 - `CacheStruct(ctx, key, ttl, generator, result, opts...) error` for JSON-serialized structs
-- `CacheC(ctx, key, ttl, generator, opts...) ([]byte, error)` where the generator returns `(data, cacheable, err)`; non-cacheable results are returned but not stored, and concurrent requests stay de-duplicated
+- `CacheC(ctx, key, ttl, generator, opts...) ([]byte, error)` where the generator returns `(data, cacheable, err)`; non-cacheable results are returned but not stored, and concurrent requests stay de-duplicated. A failure to store the value is logged instead of returned, so callers still get the generated value
 - `Invalidate(ctx, key) error` to remove a key
 - `Close() error` to stop background work gracefully
 
@@ -180,21 +180,25 @@ mux.Handle("GET /products", mw.Handler(productsHandler))
 What gets cached:
 
 - Only `GET` requests. Requests with `Range`, `Authorization` or `Cookie` headers bypass the cache (opt in with `WithAllowAuthorized()` / `WithAllowCookies()`, using a user-scoped key).
-- The key is the method, host, path, sorted query and the headers named in `WithVaryHeaders`, hashed so it is valid for every backend (including memcache). Override it with `WithKeyFunc`.
+- The key is the method, scheme, host, path, sorted query and the headers named in `WithVaryHeaders`, hashed so it is valid for every backend (including memcache). Queries that do not parse cleanly are keyed verbatim. Override it with `WithKeyFunc`. Behind a TLS-terminating proxy every request is `http`; add `X-Forwarded-Proto` to the vary headers if responses differ per scheme.
 - A response is stored only if its status is cacheable (`200` by default, see `WithCacheableStatus`), it has no `Set-Cookie`, no `Cache-Control: no-store/private/no-cache`, its body fits `WithMaxBodySize` (1 MiB by default), and its `Vary` header only names configured vary headers.
 
 Behavior:
 
 - **Request collapsing:** concurrent identical requests run the handler once and share the response, even when it is not stored (for example a `500`). Private responses (`Set-Cookie`, `private`, unsafe `Vary`, oversized) are never shared; the other requests run the handler themselves.
-- **Handler context:** the handler runs on a copy of the request without body and conditional headers, so it always returns a full response. Its context keeps the request values (auth, tracing, loggers) but is not cancelled when the client disconnects. It is bounded by `WithTimeout` (30s by default). With warm-up, the handler also runs in the background after the original request has completed.
-- **Fail open:** if the storage fails, the request is served by the handler directly and a warning is logged. The handler never runs twice for the same request.
+- **Handler context:** the handler runs on a copy of the request without body and conditional headers, so it always returns a full response. Its context keeps the request values (auth, tracing, loggers) but is not cancelled when the client disconnects.
+- **Timeout:** storage access and handler execution are bounded by `WithTimeout` (30s by default). A storage timeout fails open. A handler still running when it expires (or panicking because its context expired) produces `504 Gateway Timeout` (`503` when the cache is closing) for all waiting requests, and its output is never stored. With `WithTimeout(0)` the shared work is bounded by the deadline of the request that started it, if any.
+- **Logging:** panics and timeouts are logged once per handler execution through `WithLogger`; storage write failures are logged by anycache via `slog.Default()`.
+- **Background runs:** with warm-up, or when the triggering client disconnects, the handler may run after the original request has completed. Do not use request-scoped resources from the context (database transactions, pooled buffers, spans ended by an outer middleware) in cached handlers.
+- **Fail open:** if reading from storage fails, the request is served by the handler directly and a warning is logged. If storing fails, the response is still served and shared with waiting requests. The handler never runs twice for the same request.
 - **Panics:** a panicking handler returns `500`; `http.ErrAbortHandler` is re-panicked.
 - **Headers:** `Age` is set on hits, hop-by-hop headers and `Set-Cookie` are never stored.
 - **Invalidation:** `mw.Key(r)` returns the key for a request, to be passed to `cache.Invalidate`. Each vary-header combination has its own key.
 
 Limitations:
 
-- Streaming responses are buffered: `Flush` is a no-op and `Hijack` is not supported, so do not use the middleware on SSE or websocket routes.
+- Responses are buffered in memory: `Flush` is a no-op and `Hijack` is not supported, so do not use the middleware on SSE or websocket routes. `WithMaxBodySize` only decides what is stored; larger responses are still buffered in full, so do not wrap large download or file routes.
+- With the memcache backend, keep `WithMaxBodySize` comfortably below the memcache item size limit (1 MB by default); larger entries cannot be stored.
 - The TTL is fixed per request (`WithTTLFunc`) and is not derived from `Cache-Control: max-age`. `ETag`/`304` and `HEAD` are not handled.
 - Request headers outside the key (for example `X-Forwarded-Host`) must not affect the response. Apply response compression outside the cache middleware, or add `Accept-Encoding` to the vary headers.
 
