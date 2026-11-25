@@ -113,7 +113,9 @@ func WithMaxBodySize(n int) Option {
 // If storage access times out, the request fails open and is served by the
 // handler directly. If the handler is still running when the timeout expires,
 // its context is cancelled, its output is discarded and the requests waiting for
-// the response get 504 Gateway Timeout (503 when the cache is closing).
+// the response get 504 Gateway Timeout (503 when the cache is closing) at once.
+// A handler that ignores its context keeps running in the background until it
+// returns.
 //
 // Zero or less disables the middleware timeout; the shared work is then bounded
 // only by the context deadline of the request that started it. Requests served

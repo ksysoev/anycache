@@ -639,8 +639,9 @@ func TestMiddleware_PanicAfterDeadlineIsTimeout(t *testing.T) {
 	w := do(h, get("/p"))
 
 	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
-	assert.Contains(t, logs.String(), "handler did not finish in time")
-	assert.Contains(t, logs.String(), "nil result")
+	// The timeout is reported as soon as the context ends; the panic that follows
+	// in the abandoned handler is part of the same timeout and not logged again.
+	assert.Equal(t, 1, strings.Count(logs.String(), "handler did not finish in time"))
 	assert.NotContains(t, logs.String(), "handler panicked")
 }
 
@@ -892,4 +893,35 @@ func TestMayRunLater(t *testing.T) {
 			assert.Equal(t, tt.want, mayRunLater(tt.state))
 		})
 	}
+}
+
+func TestMiddleware_TimeoutDoesNotWaitForHandler(t *testing.T) {
+	release := make(chan struct{})
+
+	var calls atomic.Int32
+
+	// The first call ignores its context, like a blocking call made without it.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			<-release
+		}
+
+		_, _ = w.Write([]byte("late"))
+	})
+
+	h := newHandler(t, newMemoryCache(t), handler, WithTimeout(50*time.Millisecond))
+
+	start := time.Now()
+	w := do(h, get("/p"))
+
+	assert.Equal(t, http.StatusGatewayTimeout, w.Code)
+	assert.Less(t, time.Since(start), time.Second, "the timeout must not wait for the handler")
+
+	close(release)
+
+	w = do(h, get("/p"))
+
+	assert.Equal(t, StatusMiss, w.Header().Get(statusHeader), "the late response must not be stored")
+	assert.Equal(t, "late", w.Body.String())
+	assert.Equal(t, int32(2), calls.Load())
 }

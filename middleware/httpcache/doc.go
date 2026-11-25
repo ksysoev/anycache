@@ -19,10 +19,13 @@
 //
 // Only GET requests are cached. Requests with a Range, Authorization or Cookie
 // header bypass the cache by default (see WithAllowAuthorized and WithAllowCookies).
+// Upgrade requests (websockets) and requests accepting text/event-stream (SSE)
+// always bypass it.
 // A response is stored when its status is cacheable (200 by default), it has no
 // Set-Cookie header, no Cache-Control no-store/private/no-cache directive, its
 // body fits WithMaxBodySize and its Vary header only names headers configured
-// with WithVaryHeaders.
+// with WithVaryHeaders. Response freshness (max-age, s-maxage, Expires) is
+// ignored: stored responses live for the configured TTL or WithTTLFunc.
 //
 // # Request collapsing
 //
@@ -36,9 +39,10 @@
 // conditional headers (If-None-Match, If-Modified-Since, ...), so it always
 // produces a full response. Its context keeps the request values but is not
 // cancelled when the client disconnects; it is bounded by WithTimeout instead.
-// If the handler is still running when the timeout expires, whatever it wrote is
-// discarded, never stored, and the waiting requests get a 504 response (503 when
-// the cache is shutting down). A storage access that times out fails open.
+// When the timeout expires, the waiting requests get a 504 response at once (503
+// when the cache is shutting down) and whatever the handler wrote is discarded,
+// never stored. A handler that ignores its context keeps running in the
+// background until it returns, so cached handlers should respect r.Context(). A storage access that times out fails open.
 // Trailers are not supported and are dropped, and 101 Switching Protocols
 // responses are never stored or shared.
 //
@@ -53,8 +57,8 @@
 // # Streaming and memory
 //
 // Responses are buffered in memory until the handler returns: Flush is a no-op
-// and Hijack is unsupported, so routes serving SSE or websockets must not use
-// the middleware. WithMaxBodySize only controls whether a response is stored;
+// and Hijack is unsupported. Upgrade and event-stream requests bypass the cache,
+// but routes serving SSE or websockets should still not use the middleware. WithMaxBodySize only controls whether a response is stored;
 // larger responses are still buffered in full, so do not wrap routes serving
 // large downloads or files.
 //

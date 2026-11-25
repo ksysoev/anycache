@@ -21,6 +21,13 @@ func TestConfig_BypassRequest(t *testing.T) {
 		{name: "HEAD", method: http.MethodHead, want: true},
 		{name: "POST", method: http.MethodPost, want: true},
 		{name: "range", method: http.MethodGet, header: http.Header{"Range": {"bytes=0-1"}}, want: true},
+		{
+			name: "websocket upgrade", method: http.MethodGet,
+			header: http.Header{"Connection": {"Upgrade"}, "Upgrade": {"websocket"}}, want: true,
+		},
+		{name: "event stream", method: http.MethodGet, header: http.Header{"Accept": {"Text/Event-Stream"}}, want: true},
+		{name: "event stream among others", method: http.MethodGet, header: http.Header{"Accept": {"text/html", "text/event-stream;q=0.9"}}, want: true},
+		{name: "regular accept", method: http.MethodGet, header: http.Header{"Accept": {"application/json"}}, want: false},
 		{name: "authorization", method: http.MethodGet, header: http.Header{"Authorization": {"Bearer x"}}, want: true},
 		{
 			name: "authorization allowed", method: http.MethodGet, header: http.Header{"Authorization": {"Bearer x"}},

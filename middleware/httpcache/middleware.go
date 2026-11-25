@@ -154,13 +154,34 @@ func (m *Middleware) generator(src *requestSource, next http.Handler, slot *lead
 
 // execute runs next on r and records its response.
 //
+// When ctx ends before the handler returns, execute stops waiting and returns a
+// timeout error at once; the handler goroutine runs on until it returns.
+//
 // Panics and handler overruns are returned as errors and logged here, exactly
 // once per handler execution: every request waiting for the response receives
 // the same error, and the request that triggered the execution may be gone.
 // For a WithWarmUpTTL refresh, anycache also logs the returned error itself.
 func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Request, key string) (*response, error) {
 	rec := newRecorder(m.cfg.maxBodySize)
-	pe := runHandler(next, rec, r)
+
+	// The handler runs in its own goroutine so that a handler ignoring its context
+	// cannot hold the waiting requests past the timeout.
+	done := make(chan *panicError, 1)
+
+	go func() { done <- runHandler(next, rec, r) }()
+
+	var pe *panicError
+
+	select {
+	case pe = <-done:
+	case <-ctx.Done():
+		// The handler keeps running in the background until it returns. Only its
+		// goroutine still touches rec, and its output is discarded.
+		te := newTimeoutError(context.Cause(ctx))
+		m.cfg.logger.Warn("httpcache: handler did not finish in time", "key", key, "error", te.cause)
+
+		return nil, te
+	}
 
 	switch {
 	case pe != nil && pe.value == http.ErrAbortHandler:

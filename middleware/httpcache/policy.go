@@ -50,6 +50,12 @@ func (c *config) bypassRequest(r *http.Request) bool {
 		return true
 	case r.Header.Get("Range") != "":
 		return true
+	case r.Header.Get("Upgrade") != "":
+		// WebSocket and other upgrades need the connection itself (Hijack).
+		return true
+	case acceptsEventStream(r.Header):
+		// Server-sent events need Flush and a context tied to the client.
+		return true
 	case !c.allowAuthorized && r.Header.Get("Authorization") != "":
 		return true
 	case !c.allowCookies && r.Header.Get("Cookie") != "":
@@ -59,6 +65,17 @@ func (c *config) bypassRequest(r *http.Request) bool {
 	default:
 		return false
 	}
+}
+
+// acceptsEventStream reports whether the request asks for server-sent events.
+func acceptsEventStream(h http.Header) bool {
+	for _, v := range h.Values("Accept") {
+		if strings.Contains(strings.ToLower(v), "text/event-stream") {
+			return true
+		}
+	}
+
+	return false
 }
 
 // requestsNoCache reports whether the request asks to bypass cached responses.
