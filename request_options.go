@@ -33,6 +33,8 @@ func WithTimeout(timeout time.Duration) CacheItemOptions {
 // WithShouldCache sets a predicate that decides whether the generated value should be cached.
 // The function takes the generated value as input and
 // returns true to cache it or false to skip caching.
+// Requests using this option are not de-duplicated. It is ignored by CacheC,
+// where the generator itself reports whether a value is cacheable.
 func WithShouldCache(shouldCache func(any) bool) CacheItemOptions {
 	if shouldCache == nil {
 		panic("shouldCache function cannot be nil")

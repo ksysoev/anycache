@@ -62,6 +62,9 @@ type Request struct {
 	TTL         time.Duration
 	WarmUpTTL   time.Duration
 	Timeout     time.Duration
+	// ignoreSetError makes a storage write failure non-fatal: the generated
+	// value is still returned to all callers and the error is only logged.
+	ignoreSetError bool
 }
 
 type (
@@ -175,6 +178,11 @@ func (c *Cache) cache(ctx context.Context, key string, gen generator, req *Reque
 // Unlike WithShouldCache, CacheC keeps concurrent request de-duplication:
 // concurrent callers for the same key share a single generator execution and
 // all receive its result, whether or not it was stored.
+//
+// A failure to store a generated value is not returned as an error: it is
+// logged and the generated value is still returned to all callers, so a
+// failing storage does not make every caller regenerate the value.
+// The WithShouldCache option is ignored, the generator decides cacheability.
 // ttl must be greater than zero.
 func (c *Cache) CacheC(ctx context.Context, key string, ttl time.Duration, gen CacheGeneratorC, opts ...CacheItemOptions) ([]byte, error) {
 	req := &Request{
@@ -188,6 +196,7 @@ func (c *Cache) CacheC(ctx context.Context, key string, ttl time.Duration, gen C
 
 	// shouldCache is not applicable here, the generator controls cacheability.
 	req.shouldCache = nil
+	req.ignoreSetError = true
 
 	return c.cache(ctx, key, generator(gen), req)
 }
@@ -281,7 +290,8 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, gen generator) ([]byte, error) {
+// When req.ignoreSetError is set, a storage failure is logged and the value is returned without error.
+func (c *Cache) generateAndSet(ctx context.Context, key string, req *Request, gen generator) ([]byte, error) {
 	value, cacheable, err := gen(ctx)
 	if err != nil {
 		return value, err
@@ -291,14 +301,19 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duratio
 		return value, nil
 	}
 
-	ttl = randomizeTTL(c.maxShiftTTL, ttl)
+	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
 	err = c.Storage.Set(ctx, key, value, ttl)
-	if err != nil {
+
+	switch {
+	case err == nil:
+		return value, nil
+	case req.ignoreSetError:
+		slog.Warn("Failed to store generated value", "key", key, "error", err)
+		return value, nil
+	default:
 		return value, err
 	}
-
-	return value, nil
 }
 
 // randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
@@ -416,7 +431,7 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 	case errors.Is(err, ErrKeyNotExists):
 		sfState = CacheMiss
 
-		data, err = c.generateAndSet(ctx, key, req.TTL, generator)
+		data, err = c.generateAndSet(ctx, key, req, generator)
 		if err != nil {
 			return nil, err
 		}
@@ -451,7 +466,7 @@ func (c *Cache) startWarmUp(key string, generator generator, req *Request) {
 			defer cancel()
 		}
 
-		_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+		_, err := c.generateAndSet(ctx, key, req, generator)
 		if err != nil {
 			slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 		}

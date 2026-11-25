@@ -13,6 +13,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// joinGrace covers the few instructions between a caller entering CacheC and
+// joining the in-flight call: singleflight exposes no waiter count to wait on.
+const joinGrace = 10 * time.Millisecond
+
+// runCallers runs call(0) as the leader and, once the generator started,
+// call(1..callers-1) as followers. release is closed after every follower
+// entered CacheC, then runCallers waits for all calls to return.
+func runCallers(t *testing.T, callers int, started <-chan struct{}, release chan struct{}, call func(i int)) {
+	t.Helper()
+
+	var (
+		wg      sync.WaitGroup
+		entered atomic.Int32
+	)
+
+	wg.Go(func() { call(0) })
+
+	<-started
+
+	for i := 1; i < callers; i++ {
+		wg.Go(func() {
+			entered.Add(1)
+			call(i)
+		})
+	}
+
+	require.Eventually(t, func() bool { return int(entered.Load()) == callers-1 }, 5*time.Second, time.Millisecond)
+	time.Sleep(joinGrace)
+	close(release)
+	wg.Wait()
+}
+
 func TestCacheC(t *testing.T) {
 	errGen := errors.New("generator failed")
 
@@ -108,8 +140,10 @@ func TestCacheC_DeDuplicatesNonCacheable(t *testing.T) {
 
 	//nolint:unparam // generator signature requires an error result
 	gen := func(context.Context) ([]byte, bool, error) {
-		calls.Add(1)
-		close(started)
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+
 		<-release
 
 		return []byte("value"), false, nil
@@ -117,32 +151,14 @@ func TestCacheC_DeDuplicatesNonCacheable(t *testing.T) {
 
 	const callers = 5
 
-	var wg sync.WaitGroup
-
 	results := make([][]byte, callers)
 
-	wg.Go(func() {
+	runCallers(t, callers, started, release, func(i int) {
 		val, err := cache.CacheC(t.Context(), "key", time.Second, gen)
 		assert.NoError(t, err)
 
-		results[0] = val
+		results[i] = val
 	})
-
-	<-started
-
-	for i := 1; i < callers; i++ {
-		wg.Go(func() {
-			val, err := cache.CacheC(t.Context(), "key", time.Second, gen)
-			assert.NoError(t, err)
-
-			results[i] = val
-		})
-	}
-
-	// give followers time to join the in-flight call
-	time.Sleep(20 * time.Millisecond)
-	close(release)
-	wg.Wait()
 
 	assert.Equal(t, int32(1), calls.Load())
 
@@ -186,4 +202,52 @@ func TestCacheC_IgnoresShouldCache(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []byte("value"), val)
+}
+
+func TestCacheC_SetErrorIsNotFatal(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "key").Return(nil, ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Second).Return(assert.AnError).Once()
+
+	var calls atomic.Int32
+
+	release := make(chan struct{})
+	started := make(chan struct{})
+
+	//nolint:unparam // generator signature requires an error result
+	gen := func(context.Context) ([]byte, bool, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+
+		<-release
+
+		return []byte("value"), true, nil
+	}
+
+	const callers = 3
+
+	runCallers(t, callers, started, release, func(int) {
+		val, err := cache.CacheC(t.Context(), "key", time.Second, gen)
+		assert.NoError(t, err)
+		assert.Equal(t, []byte("value"), val)
+	})
+
+	assert.Equal(t, int32(1), calls.Load(), "followers must share the generated value")
+}
+
+func TestCache_SetErrorIsStillReturned(t *testing.T) {
+	store := NewMockCacheStorage(t)
+	cache := New(store)
+
+	store.EXPECT().Get(mock.Anything, "key").Return(nil, ErrKeyNotExists).Once()
+	store.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Second).Return(assert.AnError).Once()
+
+	_, err := cache.Cache(t.Context(), "key", time.Second, func(context.Context) ([]byte, error) {
+		return []byte("value"), nil
+	})
+
+	assert.ErrorIs(t, err, assert.AnError)
 }
