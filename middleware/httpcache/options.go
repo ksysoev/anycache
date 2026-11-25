@@ -120,8 +120,8 @@ func WithMaxBodySize(n int) Option {
 // by net/http have no deadline by default, so a hung handler then blocks every
 // request waiting for the same key, with no limit.
 //
-// Storing a response gets its own budget of d, so a handler that takes most of
-// the timeout is still cached.
+// Storing a response may take up to one second past d, so a handler that takes
+// most of the timeout is still cached.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d

@@ -282,3 +282,50 @@ func TestCacheC_StoreGetsFreshTimeout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []byte("value"), val)
 }
+
+func TestStoreContext(t *testing.T) {
+	const tolerance = 100 * time.Millisecond
+
+	tests := []struct {
+		name        string
+		genTimeout  time.Duration
+		timeout     time.Duration
+		wantTimeout time.Duration
+	}{
+		{name: "generator budget left is kept", genTimeout: 10 * time.Second, timeout: 10 * time.Second, wantTimeout: 10 * time.Second},
+		{name: "exhausted budget gets the grace period", genTimeout: time.Millisecond, timeout: time.Minute, wantTimeout: storeGrace},
+		{name: "grace period is capped at the timeout", genTimeout: time.Millisecond, timeout: 300 * time.Millisecond, wantTimeout: 300 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			genCtx, cancelGen := context.WithTimeout(t.Context(), tt.genTimeout)
+			defer cancelGen()
+
+			ctx, cancel := storeContext(genCtx, t.Context(), tt.timeout)
+			defer cancel()
+
+			deadline, ok := ctx.Deadline()
+			require.True(t, ok)
+			assert.InDelta(t, tt.wantTimeout, time.Until(deadline), float64(tolerance))
+		})
+	}
+
+	t.Run("no timeout uses base", func(t *testing.T) {
+		ctx, cancel := storeContext(t.Context(), t.Context(), 0)
+		defer cancel()
+
+		_, ok := ctx.Deadline()
+		assert.False(t, ok)
+	})
+
+	t.Run("cancelled with base", func(t *testing.T) {
+		base, cancelBase := context.WithCancel(t.Context())
+
+		ctx, cancel := storeContext(base, base, time.Minute)
+		defer cancel()
+
+		cancelBase()
+		assert.Error(t, ctx.Err())
+	})
+}

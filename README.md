@@ -115,7 +115,7 @@ if err := cache.Invalidate(ctx, "user:profile"); err != nil {
 
 - `WithWarmUpTTL(d)` — if remaining TTL is below `d`, serve current value and refresh in background.
 - `WithMetric(hook)` — override metric hook for one call.
-- `WithTimeout(d)` — timeout for internal storage + generation work.
+- `WithTimeout(d)` — timeout for internal storage + generation work. Storing a generated value may take up to 1s past it.
 - `WithShouldCache(func(any) bool)` — decide per result whether to persist generated data.
 
 Metric states: `hit`, `miss`, `warm_up`, `error`.
@@ -187,7 +187,7 @@ Behavior:
 
 - **Request collapsing:** concurrent identical requests run the handler once and share the response, even when it is not stored (for example a `500`). Private responses (`Set-Cookie`, `private`, unsafe `Vary`, oversized) are never shared; the other requests run the handler themselves.
 - **Handler context:** the handler runs on a copy of the request without body and conditional headers, so it always returns a full response. Its context keeps the request values (auth, tracing, loggers) but is not cancelled when the client disconnects.
-- **Timeout:** storage access and handler execution are bounded by `WithTimeout` (30s by default). A storage timeout fails open. A handler still running when it expires (or panicking because its context expired) produces `504 Gateway Timeout` (`503` when the cache is closing) for all waiting requests, and its output is never stored. With `WithTimeout(0)` the shared work is bounded only by the deadline of the request that started it; a plain `net/http` request has none, so a hung handler then blocks every request waiting for that key. Storing the response gets its own `WithTimeout` budget, so slow handlers are still cached.
+- **Timeout:** storage access and handler execution are bounded by `WithTimeout` (30s by default). A storage timeout fails open. A handler still running when it expires (or panicking because its context expired) produces `504 Gateway Timeout` (`503` when the cache is closing) for all waiting requests, and its output is never stored. With `WithTimeout(0)` the shared work is bounded only by the deadline of the request that started it; a plain `net/http` request has none, so a hung handler then blocks every request waiting for that key. Storing the response may take up to 1s past the timeout, so slow handlers are still cached.
 - **Logging:** panics, timeouts and invalid status codes are logged once per handler execution through `WithLogger`. anycache itself also logs storage write failures and failed `WithWarmUpTTL` refreshes via `slog.Default()`, so a failing background refresh appears in both.
 - **Trailers and upgrades:** response trailers are not supported and are dropped. `101 Switching Protocols` responses are never stored or shared.
 - **Background runs:** with warm-up, or when the triggering client disconnects, the handler may run after the original request has completed. Do not use request-scoped resources from the context (database transactions, pooled buffers, spans ended by an outer middleware) in cached handlers.

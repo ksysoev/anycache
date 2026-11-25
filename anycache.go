@@ -291,9 +291,9 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
 //
-// The generator runs on ctx. The value is stored on a context derived from base
-// with a fresh req.Timeout budget, so a generator that used most of its own
-// budget still leaves the storage write enough time to succeed.
+// The generator runs on ctx. The value is stored within what is left of the
+// ctx deadline, but with at least storeGrace (capped at req.Timeout), so a
+// generator that used most of its budget still leaves the write time to succeed.
 // When req.ignoreSetError is set, a storage failure is logged and the value is returned without error.
 func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Request, gen generator) ([]byte, error) {
 	value, cacheable, err := gen(ctx)
@@ -307,7 +307,7 @@ func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Reque
 
 	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
 
-	storeCtx, cancel := withOptionalTimeout(base, req.Timeout)
+	storeCtx, cancel := storeContext(ctx, base, req.Timeout)
 	defer cancel()
 
 	err = c.Storage.Set(storeCtx, key, value, ttl)
@@ -331,6 +331,28 @@ func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Co
 	}
 
 	return context.WithTimeout(ctx, timeout)
+}
+
+// storeGrace is the minimum time a storage write gets after generation, so a
+// generator finishing close to its deadline does not leave the write without time.
+const storeGrace = time.Second
+
+// storeContext returns the context for storing a value generated on genCtx.
+// It keeps the genCtx deadline but extends it to at least min(timeout, storeGrace)
+// from now. The context derives from base, so it is still cancelled with base
+// and never outlives a deadline set on base. Without a timeout it is base itself.
+func storeContext(genCtx, base context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return base, func() {}
+	}
+
+	deadline := time.Now().Add(min(timeout, storeGrace))
+
+	if genDeadline, ok := genCtx.Deadline(); ok && genDeadline.After(deadline) {
+		deadline = genDeadline
+	}
+
+	return context.WithDeadline(base, deadline)
 }
 
 // randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
