@@ -39,6 +39,8 @@
 // If the handler is still running when the timeout expires, whatever it wrote is
 // discarded, never stored, and the waiting requests get a 504 response (503 when
 // the cache is shutting down). A storage access that times out fails open.
+// Trailers are not supported and are dropped, and 101 Switching Protocols
+// responses are never stored or shared.
 //
 // The handler may run after the request that triggered it has completed: during
 // a WithWarmUpTTL background refresh, or when that client disconnected while
@@ -62,8 +64,8 @@
 // configured vary headers, and is hashed so it is valid for every storage
 // backend. The scheme is https only when the request arrived over TLS, so behind
 // a TLS-terminating proxy use WithVaryHeaders("X-Forwarded-Proto") or
-// WithKeyFunc to keep schemes apart. Queries that do not parse cleanly are
-// keyed verbatim.
+// WithKeyFunc to keep schemes apart. Query parameters are sorted by name but
+// otherwise keyed as sent, without decoding.
 // Request headers that are not part of the key (for example X-Forwarded-Host)
 // must not influence the response. Middleware.Key returns the key of a request,
 // which can be passed to anycache.Cache.Invalidate.

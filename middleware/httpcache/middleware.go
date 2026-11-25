@@ -97,9 +97,7 @@ func (m *Middleware) serve(w http.ResponseWriter, r *http.Request, next http.Han
 	var state anycache.State
 
 	src := &requestSource{orig: r}
-	// A plain hit never runs the generator later; anything else (miss, warm-up,
-	// error) may still run it after this request completes.
-	defer func() { src.release(state != anycache.CacheHit) }()
+	defer func() { src.release(mayRunLater(state)) }()
 
 	slot := &leaderSlot{}
 	gen := m.generator(src, next, slot, key)
@@ -159,6 +157,7 @@ func (m *Middleware) generator(src *requestSource, next http.Handler, slot *lead
 // Panics and handler overruns are returned as errors and logged here, exactly
 // once per handler execution: every request waiting for the response receives
 // the same error, and the request that triggered the execution may be gone.
+// For a WithWarmUpTTL refresh, anycache also logs the returned error itself.
 func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Request, key string) (*response, error) {
 	rec := newRecorder(m.cfg.maxBodySize)
 	pe := runHandler(next, rec, r)
@@ -184,6 +183,10 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 		m.cfg.logger.Error("httpcache: handler panicked", "key", key, "error", pe.value, "stack", string(pe.stack))
 		return nil, pe
 	default:
+		if rec.invalidStatus != 0 {
+			m.cfg.logger.Warn("httpcache: handler wrote an invalid status code, responding 500", "key", key, "status", rec.invalidStatus)
+		}
+
 		return rec.result(time.Now()), nil
 	}
 }
@@ -199,6 +202,8 @@ func (m *Middleware) handleError(w http.ResponseWriter, r *http.Request, next ht
 	case errors.As(err, &pe):
 		// An abort is shared on purpose: it signals a broken response (for example a
 		// failed upstream body copy in httputil.ReverseProxy) that every follower would get.
+		// Panicking is deliberate here: ErrAbortHandler is the net/http way to abort a
+		// response, and no error value can express it to the server.
 		if pe.value == http.ErrAbortHandler {
 			panic(http.ErrAbortHandler)
 		}
@@ -234,8 +239,10 @@ func (m *Middleware) writeEntry(w http.ResponseWriter, r *http.Request, next htt
 	if err != nil {
 		m.cfg.logger.Warn("httpcache: invalid cache entry, bypassing", "key", key, "error", err)
 
-		if err := m.cache.Invalidate(context.WithoutCancel(r.Context()), key); err != nil {
-			m.cfg.logger.Warn("httpcache: failed to invalidate invalid entry", "key", key, "error", err)
+		// An entry in an unsupported format may be valid for a newer version of
+		// the middleware (for example during a rolling deploy), so it is kept.
+		if errors.Is(err, ErrCorruptEntry) {
+			m.invalidate(r, key)
 		}
 
 		m.passThrough(w, r, next)
@@ -257,10 +264,33 @@ func (m *Middleware) writeEntry(w http.ResponseWriter, r *http.Request, next htt
 	m.writeBody(w, e.status, e.body)
 }
 
+// invalidate removes the entry stored under key. It is not cancelled when the
+// client disconnects but is bounded by the configured timeout.
+func (m *Middleware) invalidate(r *http.Request, key string) {
+	ctx := context.WithoutCancel(r.Context())
+
+	if m.cfg.timeout > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, m.cfg.timeout)
+		defer cancel()
+	}
+
+	if err := m.cache.Invalidate(ctx, key); err != nil {
+		m.cfg.logger.Warn("httpcache: failed to invalidate invalid entry", "key", key, "error", err)
+	}
+}
+
 // writeRecorded writes the response recorded for this very request.
+// Trailers are dropped: their values were never recorded.
 func (m *Middleware) writeRecorded(w http.ResponseWriter, resp *response) {
 	h := w.Header()
+
 	for name, values := range resp.header {
+		if isTrailer(name) {
+			continue
+		}
+
 		h[name] = values
 	}
 
@@ -323,6 +353,15 @@ func captureState(state *anycache.State) anycache.CacheItemOptions {
 			}
 		}
 	}
+}
+
+// mayRunLater reports whether the generator of a request that ended in state may
+// still run after the request completed: as a background warm-up, or after a
+// failure such as the client disconnecting while the shared execution goes on.
+// After a hit or a miss the generator either already ran or never will, so the
+// request copy it would need is not prepared.
+func mayRunLater(state anycache.State) bool {
+	return state != anycache.CacheHit && state != anycache.CacheMiss
 }
 
 func statusFor(state anycache.State) string {

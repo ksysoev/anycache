@@ -47,7 +47,7 @@ func defaultConfig() config {
 	}
 }
 
-// WithKeyFunc replaces the default "method + host + path + sorted query" key.
+// WithKeyFunc replaces the default "method + scheme + host + path + sorted query" key.
 // Returning ok=false bypasses the cache for that request.
 // Configured vary headers are still appended to the returned key.
 func WithKeyFunc(fn func(r *http.Request) (key string, ok bool)) Option {
@@ -116,7 +116,12 @@ func WithMaxBodySize(n int) Option {
 // the response get 504 Gateway Timeout (503 when the cache is closing).
 //
 // Zero or less disables the middleware timeout; the shared work is then bounded
-// by the context deadline of the request that started it, if it has one.
+// only by the context deadline of the request that started it. Requests served
+// by net/http have no deadline by default, so a hung handler then blocks every
+// request waiting for the same key, with no limit.
+//
+// Storing a response gets its own budget of d, so a handler that takes most of
+// the timeout is still cached.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d
@@ -161,8 +166,10 @@ func WithRespectRequestNoCache() Option {
 	}
 }
 
-// WithLogger sets the logger used for fail-open, panic and timeout events. Defaults to slog.Default().
-// Failures to store a response are logged by anycache itself via slog.Default().
+// WithLogger sets the logger used for fail-open, panic, timeout and invalid
+// status events. Defaults to slog.Default().
+// anycache itself logs failures to store a response and failed WithWarmUpTTL
+// refreshes via slog.Default(), so a failing refresh is logged by both.
 func WithLogger(logger *slog.Logger) Option {
 	return func(c *config) {
 		if logger != nil {

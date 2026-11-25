@@ -77,6 +77,10 @@ func TestConfig_Classify(t *testing.T) {
 		{name: "404 by default shared only", status: http.StatusNotFound, want: outcomeShare},
 		{name: "404 configured", status: http.StatusNotFound, opts: []Option{WithCacheableStatus(http.StatusOK, http.StatusNotFound)}, want: outcomeStore},
 		{name: "overflow", status: http.StatusOK, overflow: true, want: outcomePass},
+		{
+			name: "switching protocols even if configured", status: http.StatusSwitchingProtocols,
+			opts: []Option{WithCacheableStatus(http.StatusSwitchingProtocols)}, want: outcomePass,
+		},
 		{name: "set-cookie", status: http.StatusOK, header: http.Header{"Set-Cookie": {"s=1"}}, want: outcomePass},
 		{name: "set-cookie on 500", status: http.StatusInternalServerError, header: http.Header{"Set-Cookie": {"s=1"}}, want: outcomePass},
 		{name: "no-store", status: http.StatusOK, header: http.Header{"Cache-Control": {"no-store"}}, want: outcomePass},

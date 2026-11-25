@@ -81,6 +81,9 @@ func (c *config) classify(resp *response) outcome {
 	switch {
 	case resp.overflow:
 		return outcomePass
+	case resp.status == http.StatusSwitchingProtocols:
+		// An upgrade belongs to a single connection and cannot be replayed.
+		return outcomePass
 	case len(resp.header.Values("Set-Cookie")) > 0:
 		return outcomePass
 	case hasDirective(resp.header, "no-store", "private", "no-cache"):
@@ -156,7 +159,7 @@ func storableHeaders(h http.Header) http.Header {
 	out.Del("Content-Length")
 
 	for name := range out {
-		if strings.HasPrefix(name, http.TrailerPrefix) {
+		if isTrailer(name) {
 			delete(out, name)
 		}
 	}
@@ -177,4 +180,10 @@ func prepareRequest(r *http.Request) *http.Request {
 	}
 
 	return clone
+}
+
+// isTrailer reports whether name declares or carries a trailer. Trailers are
+// not supported because the recorder snapshots headers when the status is written.
+func isTrailer(name string) bool {
+	return name == "Trailer" || strings.HasPrefix(name, http.TrailerPrefix)
 }

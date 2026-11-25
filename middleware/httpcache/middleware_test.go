@@ -249,6 +249,7 @@ func TestMiddleware_FailOpen(t *testing.T) {
 		setup      func(store *anycache.MockCacheStorage)
 		name       string
 		wantStatus string
+		opts       []Option
 	}{
 		{
 			name: "get fails",
@@ -268,9 +269,30 @@ func TestMiddleware_FailOpen(t *testing.T) {
 		{
 			name: "corrupt entry is invalidated",
 			setup: func(store *anycache.MockCacheStorage) {
-				store.EXPECT().Get(mock.Anything, mock.Anything).Return([]byte{99, 1, 2}, nil).Once()
+				store.EXPECT().Get(mock.Anything, mock.Anything).Return([]byte{entryVersion}, nil).Once()
 				store.EXPECT().Del(mock.Anything, mock.Anything).Return(nil).Once()
 			},
+			wantStatus: StatusBypass,
+		},
+		{
+			// A newer middleware version may have written it, so it must not be deleted.
+			name: "unsupported version is kept",
+			setup: func(store *anycache.MockCacheStorage) {
+				store.EXPECT().Get(mock.Anything, mock.Anything).Return([]byte{entryVersion + 1, 1, 2}, nil).Once()
+			},
+			wantStatus: StatusBypass,
+		},
+		{
+			name: "hanging invalidate is bounded by the timeout",
+			setup: func(store *anycache.MockCacheStorage) {
+				store.EXPECT().Get(mock.Anything, mock.Anything).Return([]byte{entryVersion}, nil).Once()
+				store.EXPECT().Del(mock.Anything, mock.Anything).
+					RunAndReturn(func(ctx context.Context, _ string) error {
+						<-ctx.Done()
+						return ctx.Err()
+					}).Once()
+			},
+			opts:       []Option{WithTimeout(50 * time.Millisecond)},
 			wantStatus: StatusBypass,
 		},
 	}
@@ -281,7 +303,7 @@ func TestMiddleware_FailOpen(t *testing.T) {
 			tt.setup(store)
 
 			handler := &countingHandler{body: "fresh"}
-			h := newHandler(t, anycache.New(store), handler)
+			h := newHandler(t, anycache.New(store), handler, tt.opts...)
 
 			w := do(h, get("/p"))
 
@@ -819,4 +841,55 @@ func TestMiddleware_PanicIsLoggedOnce(t *testing.T) {
 
 	assert.Equal(t, int32(1), bh.calls.Load())
 	assert.Equal(t, 1, strings.Count(logs.String(), "handler panicked"))
+}
+
+func TestMiddleware_LeaderResponseDropsTrailers(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Trailer", "X-Checksum")
+		w.Header().Set("Cache-Control", "private")
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set("X-Checksum", "abc")
+		w.Header().Set(http.TrailerPrefix+"X-Late", "1")
+	})
+
+	w := do(newHandler(t, newMemoryCache(t), handler), get("/p"))
+
+	assert.Equal(t, "body", w.Body.String())
+	assert.Equal(t, "private", w.Header().Get("Cache-Control"))
+	assert.Empty(t, w.Header().Values("Trailer"), "trailers are never sent, so they must not be announced")
+	assert.Empty(t, w.Result().Trailer)
+}
+
+func TestMiddleware_InvalidStatusIsLogged(t *testing.T) {
+	logs := &syncBuffer{}
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(42)
+	})
+
+	h := newHandler(t, newMemoryCache(t), handler, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+
+	w := do(h, get("/p"))
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Contains(t, logs.String(), "invalid status code")
+	assert.Contains(t, logs.String(), "status=42")
+}
+
+func TestMayRunLater(t *testing.T) {
+	tests := []struct {
+		state anycache.State
+		want  bool
+	}{
+		{state: anycache.CacheHit, want: false},
+		{state: anycache.CacheMiss, want: false},
+		{state: anycache.CacheWarmUp, want: true},
+		{state: anycache.CacheError, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.state), func(t *testing.T) {
+			assert.Equal(t, tt.want, mayRunLater(tt.state))
+		})
+	}
 }

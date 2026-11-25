@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -80,23 +80,28 @@ func defaultKey(r *http.Request) string {
 	return b.String()
 }
 
-// writeQuery writes the query sorted by key so that parameter order does not
-// matter. A query that does not parse cleanly (invalid escapes, semicolons) is
-// written verbatim, because parsing would silently drop the invalid pairs and
-// make different queries share a key.
+// writeQuery writes the query with its parameters sorted by name, so that
+// parameter order does not matter. The parameters are compared and written as
+// they were sent, without decoding: "a" and "a=" or "a+b" and "a%20b" mean the
+// same to url.ParseQuery but not to a handler reading the raw query, so they get
+// different keys. The sort is stable, so repeated parameters keep their order.
 func writeQuery(b *strings.Builder, rawQuery string) {
 	if rawQuery == "" {
 		return
 	}
 
-	values, err := url.ParseQuery(rawQuery)
-	if err != nil {
-		b.WriteString("raw:")
-		b.WriteString(rawQuery)
+	params := strings.Split(rawQuery, "&")
 
-		return
-	}
+	slices.SortStableFunc(params, func(x, y string) int {
+		return strings.Compare(paramName(x), paramName(y))
+	})
 
-	b.WriteString("q:")
-	b.WriteString(values.Encode())
+	b.WriteString(strings.Join(params, "&"))
+}
+
+// paramName returns the still encoded name of a raw "name=value" query parameter.
+func paramName(param string) string {
+	name, _, _ := strings.Cut(param, "=")
+
+	return name
 }

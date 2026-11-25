@@ -31,7 +31,9 @@ type recorder struct {
 	body     bytes.Buffer
 	maxBody  int
 	status   int
-	overflow bool
+	// invalidStatus is the out-of-range code the handler passed to WriteHeader, if any.
+	invalidStatus int
+	overflow      bool
 }
 
 // newRecorder creates a recorder that marks responses larger than maxBody as overflowed.
@@ -50,12 +52,15 @@ func (r *recorder) Header() http.Header {
 
 // WriteHeader records the response status code and snapshots the headers.
 // Informational (1xx) codes are ignored and only the first final code is kept.
+// An out-of-range code is recorded as 500 and remembered so it can be reported:
+// net/http would panic on it instead.
 func (r *recorder) WriteHeader(code int) {
 	if r.status != 0 {
 		return
 	}
 
 	if code < minStatusCode || code > maxStatusCode {
+		r.invalidStatus = code
 		code = http.StatusInternalServerError
 	}
 

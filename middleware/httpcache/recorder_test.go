@@ -16,6 +16,7 @@ func TestRecorder(t *testing.T) {
 		wantBody     string
 		maxBody      int
 		wantStatus   int
+		wantInvalid  int
 		wantOverflow bool
 	}{
 		{
@@ -53,10 +54,11 @@ func TestRecorder(t *testing.T) {
 			wantHeader: http.Header{"Link": {"</a.css>"}},
 		},
 		{
-			name:       "invalid status becomes 500",
-			handler:    func(_ *testing.T, w http.ResponseWriter) { w.WriteHeader(42) },
-			wantStatus: http.StatusInternalServerError,
-			wantHeader: http.Header{},
+			name:        "invalid status becomes 500",
+			handler:     func(_ *testing.T, w http.ResponseWriter) { w.WriteHeader(42) },
+			wantStatus:  http.StatusInternalServerError,
+			wantInvalid: 42,
+			wantHeader:  http.Header{},
 		},
 		{
 			name: "body not allowed for 204",
@@ -95,6 +97,7 @@ func TestRecorder(t *testing.T) {
 			assert.Equal(t, tt.wantHeader, resp.header)
 			assert.Equal(t, tt.wantBody, string(resp.body))
 			assert.Equal(t, tt.wantOverflow, resp.overflow)
+			assert.Equal(t, tt.wantInvalid, rec.invalidStatus)
 		})
 	}
 }

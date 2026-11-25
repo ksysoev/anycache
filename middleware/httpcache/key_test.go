@@ -141,6 +141,12 @@ func TestMiddleware_Key_Query(t *testing.T) {
 		{name: "invalid escape is not dropped", a: "/s?q=%zz", b: "/s"},
 		{name: "raw query cannot collide with parsed", a: "/s?q=1;x=2", b: "/s?q=1%3Bx%3D2"},
 		{name: "different invalid queries", a: "/s?q=%zz", b: "/s?q=%yy"},
+		{name: "invalid queries ignore order", a: "/s?q=%zz&a=1", b: "/s?a=1&q=%zz", same: true},
+		{name: "missing value differs from empty value", a: "/s?a", b: "/s?a="},
+		{name: "plus differs from encoded space", a: "/s?q=a+b", b: "/s?q=a%20b"},
+		{name: "encoded letter differs from plain letter", a: "/s?q=%41", b: "/s?q=A"},
+		{name: "encoded name differs from plain name", a: "/s?%61=1", b: "/s?a=1"},
+		{name: "empty parameter is kept", a: "/s?a=1&", b: "/s?a=1"},
 	}
 
 	for _, tt := range tests {

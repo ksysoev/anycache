@@ -270,7 +270,6 @@ func TestCacheC_StoreGetsFreshTimeout(t *testing.T) {
 			return nil
 		}).Once()
 
-	//nolint:unparam // generator signature requires an error result
 	gen := func(ctx context.Context) ([]byte, bool, error) {
 		// Use up the whole budget, like a handler finishing right at its deadline.
 		<-ctx.Done()
