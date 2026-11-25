@@ -68,6 +68,10 @@ type (
 	generator       func(ctx context.Context) ([]byte, bool, error)
 	CacheGenerator  func(ctx context.Context) ([]byte, error)
 	CacheGeneratorS func(ctx context.Context) (string, error)
+	// CacheGeneratorC produces a value and reports whether it may be stored.
+	// When cacheable is false the value is returned to the caller (and to all
+	// concurrent de-duplicated callers) but is not written to the storage.
+	CacheGeneratorC func(ctx context.Context) (data []byte, cacheable bool, err error)
 	CacheOptions    func(*Cache)
 )
 
@@ -163,6 +167,29 @@ func (c *Cache) cache(ctx context.Context, key string, gen generator, req *Reque
 	state = val.state
 
 	return val.data, nil
+}
+
+// CacheC returns the cached value for key or generates it on miss, letting the
+// generator decide per result whether the value is stored.
+//
+// Unlike WithShouldCache, CacheC keeps concurrent request de-duplication:
+// concurrent callers for the same key share a single generator execution and
+// all receive its result, whether or not it was stored.
+// ttl must be greater than zero.
+func (c *Cache) CacheC(ctx context.Context, key string, ttl time.Duration, gen CacheGeneratorC, opts ...CacheItemOptions) ([]byte, error) {
+	req := &Request{
+		TTL:        ttl,
+		MetricHook: c.observer,
+	}
+
+	for _, opt := range opts {
+		opt(req)
+	}
+
+	// shouldCache is not applicable here, the generator controls cacheability.
+	req.shouldCache = nil
+
+	return c.cache(ctx, key, generator(gen), req)
 }
 
 // CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
