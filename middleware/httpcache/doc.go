@@ -42,7 +42,12 @@
 // When the timeout expires, the waiting requests get a 504 response at once (503
 // when the cache is shutting down) and whatever the handler wrote is discarded,
 // never stored. A handler that ignores its context keeps running in the
-// background until it returns, so cached handlers should respect r.Context(). A storage access that times out fails open.
+// background until it returns, so cached handlers should respect r.Context().
+// The storage read shares the timeout with the handler: a read that times out
+// fails open, but a slow read that then misses leaves the handler only the rest
+// of the timeout. A handler panic produces a 500 response, and a handler that
+// aborts with http.ErrAbortHandler produces a 502: the response is buffered, so
+// nothing partial ever reached the client.
 // Trailers are not supported and are dropped, and 101 Switching Protocols
 // responses are never stored or shared.
 //

@@ -157,10 +157,12 @@ func (m *Middleware) generator(src *requestSource, next http.Handler, slot *lead
 // When ctx ends before the handler returns, execute stops waiting and returns a
 // timeout error at once; the handler goroutine runs on until it returns.
 //
-// Panics and handler overruns are returned as errors and logged here, exactly
-// once per handler execution: every request waiting for the response receives
-// the same error, and the request that triggered the execution may be gone.
-// For a WithWarmUpTTL refresh, anycache also logs the returned error itself.
+// Panics, aborts and handler overruns are returned as errors and logged here.
+// This deliberately both logs and returns the error: execute is the only place
+// that runs exactly once per handler execution, every request waiting for the
+// response receives the same error, and the request that triggered the
+// execution may already be gone. For a WithWarmUpTTL refresh, anycache also
+// logs the returned error itself.
 func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Request, key string) (*response, error) {
 	rec := newRecorder(m.cfg.maxBodySize)
 
@@ -185,8 +187,11 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 
 	switch {
 	case pe != nil && pe.value == http.ErrAbortHandler:
-		// Deliberate abort, handled like net/http does: not logged, re-panicked by every waiting request.
-		return nil, pe
+		// The handler aborted its response, for example httputil.ReverseProxy when
+		// copying the upstream body fails. Nothing reached the client yet, since the
+		// response is buffered, so the waiting requests get a clean 502 instead.
+		m.cfg.logger.Warn("httpcache: handler aborted the response", "key", key)
+		return nil, newAbortError()
 	case ctx.Err() != nil:
 		// A handler that outlived its context may have written a partial or error
 		// response, or panicked because of the cancellation: never serve, share or store it.
@@ -216,20 +221,15 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 func (m *Middleware) handleError(w http.ResponseWriter, r *http.Request, next http.Handler, slot *leaderSlot, key string, err error) {
 	var (
 		pe *panicError
+		ae *abortError
 		te *timeoutError
 	)
 
 	switch {
 	case errors.As(err, &pe):
-		// An abort is shared on purpose: it signals a broken response (for example a
-		// failed upstream body copy in httputil.ReverseProxy) that every follower would get.
-		// Panicking is deliberate here: ErrAbortHandler is the net/http way to abort a
-		// response, and no error value can express it to the server.
-		if pe.value == http.ErrAbortHandler {
-			panic(http.ErrAbortHandler)
-		}
-
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	case errors.As(err, &ae):
+		http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 	case errors.As(err, &te):
 		code := http.StatusServiceUnavailable
 		if errors.Is(te.cause, context.DeadlineExceeded) {
@@ -426,6 +426,18 @@ func newPanicError(value any, stack []byte) *panicError {
 
 func (e *panicError) Error() string {
 	return fmt.Sprintf("httpcache: handler panicked: %v", e.value)
+}
+
+// abortError reports that the handler aborted its response with http.ErrAbortHandler.
+type abortError struct{}
+
+// newAbortError creates an abortError.
+func newAbortError() *abortError {
+	return &abortError{}
+}
+
+func (e *abortError) Error() string {
+	return "httpcache: handler aborted the response"
 }
 
 // timeoutError reports that the handler context ended before the handler returned.

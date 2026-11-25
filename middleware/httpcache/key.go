@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -42,18 +43,25 @@ func (m *Middleware) key(r *http.Request) (string, bool) {
 
 	var b strings.Builder
 
-	b.WriteString(canonical)
+	// Every part is length-prefixed, so a custom key containing separators cannot
+	// be mistaken for a shorter key followed by vary header values.
+	writePart(&b, canonical)
 
 	for _, name := range m.cfg.varyHeaders {
-		b.WriteByte('\n')
-		b.WriteString(name)
-		b.WriteByte(':')
-		b.WriteString(strings.Join(r.Header.Values(name), ","))
+		writePart(&b, name)
+		writePart(&b, strings.Join(r.Header.Values(name), ","))
 	}
 
 	sum := sha256.Sum256([]byte(b.String()))
 
 	return keyPrefix + hex.EncodeToString(sum[:]), true
+}
+
+// writePart writes part as "<length>:<part>".
+func writePart(b *strings.Builder, part string) {
+	b.WriteString(strconv.Itoa(len(part)))
+	b.WriteByte(':')
+	b.WriteString(part)
 }
 
 // defaultKey returns "METHOD\nscheme\nhost\npath\nquery" for r.

@@ -54,6 +54,17 @@ func TestRecorder(t *testing.T) {
 			wantHeader: http.Header{"Link": {"</a.css>"}},
 		},
 		{
+			name: "header keys are canonicalized and merged",
+			handler: func(_ *testing.T, w http.ResponseWriter) {
+				w.Header()["Set-Cookie"] = []string{"a=1"}
+				w.Header()["set-cookie"] = []string{"b=2"}
+				w.Header()["cache-control"] = []string{"private"}
+				w.WriteHeader(http.StatusOK)
+			},
+			wantStatus: http.StatusOK,
+			wantHeader: http.Header{"Set-Cookie": {"a=1", "b=2"}, "Cache-Control": {"private"}},
+		},
+		{
 			name:        "invalid status becomes 500",
 			handler:     func(_ *testing.T, w http.ResponseWriter) { w.WriteHeader(42) },
 			wantStatus:  http.StatusInternalServerError,

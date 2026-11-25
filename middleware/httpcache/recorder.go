@@ -3,6 +3,7 @@ package httpcache
 import (
 	"bytes"
 	"net/http"
+	"net/textproto"
 	"time"
 )
 
@@ -50,7 +51,7 @@ func (r *recorder) Header() http.Header {
 	return r.header
 }
 
-// WriteHeader records the response status code and snapshots the headers.
+// WriteHeader records the response status code and snapshots the headers with canonical keys.
 // Informational (1xx) codes are ignored and only the first final code is kept.
 // An out-of-range code is recorded as 500 and remembered so it can be reported:
 // net/http would panic on it instead.
@@ -69,7 +70,30 @@ func (r *recorder) WriteHeader(code int) {
 	}
 
 	r.status = code
-	r.snapshot = r.header.Clone()
+	r.snapshot = canonicalHeader(r.header)
+}
+
+// canonicalHeader returns a copy of h with every key in canonical form.
+// net/http sends keys exactly as the handler wrote them, so a handler may set
+// h["set-cookie"] directly; canonical keys make sure the storage policy, which
+// looks headers up by their canonical names, sees every header. Values of keys
+// that differ only in case are merged, canonical key first.
+func canonicalHeader(h http.Header) http.Header {
+	out := make(http.Header, len(h))
+
+	for name, values := range h {
+		if textproto.CanonicalMIMEHeaderKey(name) == name {
+			out[name] = append(out[name], values...)
+		}
+	}
+
+	for name, values := range h {
+		if canonical := textproto.CanonicalMIMEHeaderKey(name); canonical != name {
+			out[canonical] = append(out[canonical], values...)
+		}
+	}
+
+	return out
 }
 
 // Write buffers the response body, writing an implicit 200 status first if needed.

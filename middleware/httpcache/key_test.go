@@ -159,3 +159,23 @@ func TestMiddleware_Key_Query(t *testing.T) {
 		})
 	}
 }
+
+func TestMiddleware_Key_PartsCannotCollide(t *testing.T) {
+	mw := newTestMiddleware(t, WithVaryHeaders("Accept"), WithKeyFunc(func(r *http.Request) (string, bool) {
+		return r.URL.Query().Get("k"), true
+	}))
+
+	// A custom key that looks like a shorter key followed by a vary header...
+	forged := httptest.NewRequest(http.MethodGet, "/?k=user%0AAccept:json", http.NoBody)
+
+	// ...and a request built in code whose header value continues the key.
+	plain := httptest.NewRequest(http.MethodGet, "/?k=user", http.NoBody)
+	plain.Header["Accept"] = []string{"json\nAccept:"}
+
+	k1, ok1 := mw.Key(forged)
+	k2, ok2 := mw.Key(plain)
+
+	require.True(t, ok1)
+	require.True(t, ok2)
+	assert.NotEqual(t, k1, k2)
+}

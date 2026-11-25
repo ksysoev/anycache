@@ -158,6 +158,30 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
+			name:          "lowercase set-cookie is not cached",
+			req:           func() *http.Request { return get("/p") },
+			handler:       &countingHandler{body: "c", header: http.Header{"set-cookie": {"s=1"}}},
+			wantCalls:     2,
+			wantStatus2:   StatusMiss,
+			wantHTTPCode2: http.StatusOK,
+		},
+		{
+			name:          "lowercase private is not cached",
+			req:           func() *http.Request { return get("/p") },
+			handler:       &countingHandler{body: "c", header: http.Header{"cache-control": {"private"}}},
+			wantCalls:     2,
+			wantStatus2:   StatusMiss,
+			wantHTTPCode2: http.StatusOK,
+		},
+		{
+			name:          "lowercase unsafe vary is not cached",
+			req:           func() *http.Request { return get("/p") },
+			handler:       &countingHandler{body: "v", header: http.Header{"vary": {"Cookie"}}},
+			wantCalls:     2,
+			wantStatus2:   StatusMiss,
+			wantHTTPCode2: http.StatusOK,
+		},
+		{
 			name:          "oversized body is not cached",
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "a-very-long-body"},
@@ -326,14 +350,18 @@ func TestMiddleware_Panics(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 	})
 
-	t.Run("ErrAbortHandler is re-panicked", func(t *testing.T) {
-		h := newHandler(t, newMemoryCache(t), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+	t.Run("ErrAbortHandler becomes 502", func(t *testing.T) {
+		h := newHandler(t, newMemoryCache(t), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("partial"))
+
 			panic(http.ErrAbortHandler)
 		}))
 
-		assert.PanicsWithValue(t, http.ErrAbortHandler, func() {
-			do(h, get("/p"))
-		})
+		var w *httptest.ResponseRecorder
+
+		assert.NotPanics(t, func() { w = do(h, get("/p")) })
+		assert.Equal(t, http.StatusBadGateway, w.Code)
+		assert.NotContains(t, w.Body.String(), "partial")
 	})
 }
 
@@ -924,4 +952,26 @@ func TestMiddleware_TimeoutDoesNotWaitForHandler(t *testing.T) {
 	assert.Equal(t, StatusMiss, w.Header().Get(statusHeader), "the late response must not be stored")
 	assert.Equal(t, "late", w.Body.String())
 	assert.Equal(t, int32(2), calls.Load())
+}
+
+func TestMiddleware_AbortIsSharedAs502(t *testing.T) {
+	logs := &syncBuffer{}
+	bh := newBlockingHandler(false)
+
+	aborting := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bh.ServeHTTP(w, r)
+		panic(http.ErrAbortHandler)
+	})
+
+	h := newHandler(t, newMemoryCache(t), aborting, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+
+	results := runConcurrent(t, h, bh, 4)
+
+	for _, res := range results {
+		require.NotNil(t, res)
+		assert.Equal(t, http.StatusBadGateway, res.status)
+	}
+
+	assert.Equal(t, int32(1), bh.calls.Load())
+	assert.Equal(t, 1, strings.Count(logs.String(), "handler aborted the response"))
 }
