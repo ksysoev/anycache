@@ -68,6 +68,7 @@ func main() {
 - `Cache(ctx, key, ttl, generator, opts...) ([]byte, error)` for raw `[]byte`
 - `CacheS(ctx, key, ttl, generator, opts...) (string, error)` for string values
 - `CacheStruct(ctx, key, ttl, generator, result, opts...) error` for JSON-serialized structs
+- `CacheC(ctx, key, ttl, generator, opts...) ([]byte, error)` where the generator returns `(data, cacheable, err)`; non-cacheable results are returned but not stored, and concurrent requests stay de-duplicated
 - `Invalidate(ctx, key) error` to remove a key
 - `Close() error` to stop background work gracefully
 
@@ -126,6 +127,7 @@ Metric states: `hit`, `miss`, `warm_up`, `error`.
 - **Warm-up lock semantics:** only one warm-up refresh per key is started at a time; concurrent requests do not start duplicate warm-up goroutines.
 - **Context model for deduplicated requests:** singleflight-backed requests run storage/generator work on the cache base context (default or `WithBaseContext`) so one caller cancellation does not abort shared work for the same key.
 - **Timeout behavior (`WithTimeout` + caller deadlines):** `WithTimeout` sets an explicit timeout for internal work. If no explicit timeout is set and the initiating caller context has a deadline, that deadline is mirrored as an internal timeout for the shared work.
+- **Conditional caching (`CacheC`):** the generator decides per result whether it is stored. Unlike `WithShouldCache`, concurrent callers still share one generator execution and all receive its result, stored or not.
 - **Conditional caching (`WithShouldCache`):** the predicate receives the original generator value type used by the API call (`[]byte` for `Cache`, `string` for `CacheS`, and the original struct/object for `CacheStruct`). Return `false` to skip storing while still returning generated data.
 - **Caller cancellation expectations:** caller cancellation still stops waiting for that caller, but internal shared work continues on the cache base context.
 - **Lifecycle (`Close`):** call `Close()` during shutdown to cancel background work and wait for in-flight warm-up goroutines to finish.
@@ -155,6 +157,46 @@ anycache may be a poor fit when:
 ## Release notes
 
 See [GitHub Releases](https://github.com/ksysoev/anycache/releases) for release notes and version-to-version changes. Tags are available at [GitHub Tags](https://github.com/ksysoev/anycache/tags).
+
+## HTTP caching middleware
+
+`github.com/ksysoev/anycache/middleware/httpcache` caches responses of HTTP handlers. It uses only the standard library and has the usual `func(http.Handler) http.Handler` shape, so it works with `net/http`, chi, gorilla and similar routers.
+
+```go
+cache := anycache.New(store)
+
+mw, err := httpcache.New(cache, time.Minute,
+	httpcache.WithVaryHeaders("Accept"),
+	httpcache.WithCacheStatusHeader("X-Cache"), // HIT | MISS | WARM_UP | BYPASS
+	httpcache.WithWarmUpTTL(10*time.Second),
+)
+if err != nil {
+	return err
+}
+
+mux.Handle("GET /products", mw.Handler(productsHandler))
+```
+
+What gets cached:
+
+- Only `GET` requests. Requests with `Range`, `Authorization` or `Cookie` headers bypass the cache (opt in with `WithAllowAuthorized()` / `WithAllowCookies()`, using a user-scoped key).
+- The key is the method, host, path, sorted query and the headers named in `WithVaryHeaders`, hashed so it is valid for every backend (including memcache). Override it with `WithKeyFunc`.
+- A response is stored only if its status is cacheable (`200` by default, see `WithCacheableStatus`), it has no `Set-Cookie`, no `Cache-Control: no-store/private/no-cache`, its body fits `WithMaxBodySize` (1 MiB by default), and its `Vary` header only names configured vary headers.
+
+Behavior:
+
+- **Request collapsing:** concurrent identical requests run the handler once and share the response, even when it is not stored (for example a `500`). Private responses (`Set-Cookie`, `private`, unsafe `Vary`, oversized) are never shared; the other requests run the handler themselves.
+- **Handler context:** the handler runs on a copy of the request without body and conditional headers, so it always returns a full response. Its context keeps the request values (auth, tracing, loggers) but is not cancelled when the client disconnects. It is bounded by `WithTimeout` (30s by default). With warm-up, the handler also runs in the background after the original request has completed.
+- **Fail open:** if the storage fails, the request is served by the handler directly and a warning is logged. The handler never runs twice for the same request.
+- **Panics:** a panicking handler returns `500`; `http.ErrAbortHandler` is re-panicked.
+- **Headers:** `Age` is set on hits, hop-by-hop headers and `Set-Cookie` are never stored.
+- **Invalidation:** `mw.Key(r)` returns the key for a request, to be passed to `cache.Invalidate`. Each vary-header combination has its own key.
+
+Limitations:
+
+- Streaming responses are buffered: `Flush` is a no-op and `Hijack` is not supported, so do not use the middleware on SSE or websocket routes.
+- The TTL is fixed per request (`WithTTLFunc`) and is not derived from `Cache-Control: max-age`. `ETag`/`304` and `HEAD` are not handled.
+- Request headers outside the key (for example `X-Forwarded-Host`) must not affect the response. Apply response compression outside the cache middleware, or add `Accept-Encoding` to the vary headers.
 
 ## Storage backends
 
