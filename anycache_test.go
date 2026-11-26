@@ -232,7 +232,15 @@ func TestCacheMetricHook_WarmUp(t *testing.T) {
 	}))
 
 	store.EXPECT().GetWithTTL(mock.Anything, "metric-warmup").Return([]byte("cached"), 500*time.Millisecond, nil)
-	store.EXPECT().Set(mock.Anything, "metric-warmup", []byte("fresh"), 2*time.Second).Return(nil)
+
+	stored := make(chan struct{})
+
+	store.EXPECT().Set(mock.Anything, "metric-warmup", []byte("fresh"), 2*time.Second).
+		RunAndReturn(func(context.Context, string, []byte, time.Duration) error {
+			close(stored)
+
+			return nil
+		})
 
 	result, err := cache.Cache(t.Context(), "metric-warmup", 2*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second))
 
@@ -240,6 +248,9 @@ func TestCacheMetricHook_WarmUp(t *testing.T) {
 	assert.Equal(t, []byte("cached"), result)
 	assert.Equal(t, CacheWarmUp, observedState)
 	assert.GreaterOrEqual(t, observedLatency, time.Duration(0))
+
+	// Close cancels in-flight warm-ups, so wait for the refresh to be stored first.
+	<-stored
 	assert.NoError(t, cache.Close())
 }
 
@@ -790,7 +801,12 @@ func TestCache_WarmUpHonorsTimeout(t *testing.T) {
 	cache := New(store)
 
 	store.EXPECT().GetWithTTL(mock.Anything, "warmup-timeout").Return([]byte("cached"), 200*time.Millisecond, nil).Once()
+
+	stored := make(chan struct{})
+
 	store.EXPECT().Set(mock.Anything, "warmup-timeout", []byte("fresh"), mock.Anything).RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ time.Duration) error {
+		defer close(stored)
+
 		_, ok := ctx.Deadline()
 		assert.True(t, ok, "expected warm up context with deadline")
 
@@ -801,6 +817,9 @@ func TestCache_WarmUpHonorsTimeout(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("cached"), result)
+
+	// Close cancels in-flight warm-ups, so wait for the refresh to be stored first.
+	<-stored
 	assert.NoError(t, cache.Close())
 }
 
@@ -809,11 +828,21 @@ func TestCache_WarmUpSetErrorIsHandled(t *testing.T) {
 	cache := New(store)
 
 	store.EXPECT().GetWithTTL(mock.Anything, "warmup-set-error").Return([]byte("cached"), 200*time.Millisecond, nil).Once()
-	store.EXPECT().Set(mock.Anything, "warmup-set-error", []byte("fresh"), mock.Anything).Return(assert.AnError).Once()
+
+	stored := make(chan struct{})
+
+	store.EXPECT().Set(mock.Anything, "warmup-set-error", []byte("fresh"), mock.Anything).RunAndReturn(func(context.Context, string, []byte, time.Duration) error {
+		close(stored)
+
+		return assert.AnError
+	}).Once()
 
 	result, err := cache.Cache(t.Context(), "warmup-set-error", 2*time.Second, getGenerator([]byte("fresh"), nil), WithWarmUpTTL(time.Second))
 
 	assert.NoError(t, err)
 	assert.Equal(t, []byte("cached"), result)
+
+	// Close cancels in-flight warm-ups, so wait for the refresh to reach storage first.
+	<-stored
 	assert.NoError(t, cache.Close())
 }

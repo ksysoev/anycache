@@ -62,12 +62,19 @@ type Request struct {
 	TTL         time.Duration
 	WarmUpTTL   time.Duration
 	Timeout     time.Duration
+	// ignoreSetError makes a storage write failure non-fatal: the generated
+	// value is still returned to all callers and the error is only logged.
+	ignoreSetError bool
 }
 
 type (
 	generator       func(ctx context.Context) ([]byte, bool, error)
 	CacheGenerator  func(ctx context.Context) ([]byte, error)
 	CacheGeneratorS func(ctx context.Context) (string, error)
+	// CacheGeneratorC produces a value and reports whether it may be stored.
+	// When cacheable is false the value is returned to the caller (and to all
+	// concurrent de-duplicated callers) but is not written to the storage.
+	CacheGeneratorC func(ctx context.Context) (data []byte, cacheable bool, err error)
 	CacheOptions    func(*Cache)
 )
 
@@ -165,6 +172,35 @@ func (c *Cache) cache(ctx context.Context, key string, gen generator, req *Reque
 	return val.data, nil
 }
 
+// CacheC returns the cached value for key or generates it on miss, letting the
+// generator decide per result whether the value is stored.
+//
+// Unlike WithShouldCache, CacheC keeps concurrent request de-duplication:
+// concurrent callers for the same key share a single generator execution and
+// all receive its result, whether or not it was stored.
+//
+// A failure to store a generated value is not returned as an error: it is
+// logged and the generated value is still returned to all callers, so a
+// failing storage does not make every caller regenerate the value.
+// The WithShouldCache option is ignored, the generator decides cacheability.
+// ttl must be greater than zero.
+func (c *Cache) CacheC(ctx context.Context, key string, ttl time.Duration, gen CacheGeneratorC, opts ...CacheItemOptions) ([]byte, error) {
+	req := &Request{
+		TTL:        ttl,
+		MetricHook: c.observer,
+	}
+
+	for _, opt := range opts {
+		opt(req)
+	}
+
+	// shouldCache is not applicable here, the generator controls cacheability.
+	req.shouldCache = nil
+	req.ignoreSetError = true
+
+	return c.cache(ctx, key, generator(gen), req)
+}
+
 // CacheS is a convenience method that wraps the Cache method to return a string value instead of a byte slice.
 func (c *Cache) CacheS(ctx context.Context, key string, ttl time.Duration, generator CacheGeneratorS, opts ...CacheItemOptions) (string, error) {
 	req := &Request{
@@ -254,7 +290,10 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // generateAndSet generates a value using the provided generator function,
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
-func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duration, gen generator) ([]byte, error) {
+//
+// The generator runs on ctx; see store for how the value is stored.
+// When req.ignoreSetError is set, a storage failure is logged and the value is returned without error.
+func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Request, gen generator) ([]byte, error) {
 	value, cacheable, err := gen(ctx)
 	if err != nil {
 		return value, err
@@ -264,14 +303,67 @@ func (c *Cache) generateAndSet(ctx context.Context, key string, ttl time.Duratio
 		return value, nil
 	}
 
-	ttl = randomizeTTL(c.maxShiftTTL, ttl)
+	err = c.store(ctx, base, key, value, req)
 
-	err = c.Storage.Set(ctx, key, value, ttl)
-	if err != nil {
+	switch {
+	case err == nil:
+		return value, nil
+	case req.ignoreSetError:
+		slog.Warn("Failed to store generated value", "key", key, "error", err)
+		return value, nil
+	default:
 		return value, err
 	}
+}
 
-	return value, nil
+// store writes a value generated on genCtx to storage.
+//
+// A generator that returned after genCtx ended may have produced a partial
+// value, so it is never stored. Otherwise the value is stored within what is
+// left of the genCtx deadline, but with at least storeGrace (capped at
+// req.Timeout), so a generator finishing close to its deadline still leaves
+// the write time to succeed.
+func (c *Cache) store(genCtx, base context.Context, key string, value []byte, req *Request) error {
+	if err := genCtx.Err(); err != nil {
+		return fmt.Errorf("generator returned after its context ended: %w", err)
+	}
+
+	storeCtx, cancel := storeContext(genCtx, base, req.Timeout)
+	defer cancel()
+
+	return c.Storage.Set(storeCtx, key, value, randomizeTTL(c.maxShiftTTL, req.TTL))
+}
+
+// withOptionalTimeout returns a context derived from ctx that times out after
+// timeout, or ctx itself when timeout is not positive.
+func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return ctx, func() {}
+	}
+
+	return context.WithTimeout(ctx, timeout)
+}
+
+// storeGrace is the minimum time a storage write gets after generation, so a
+// generator finishing close to its deadline does not leave the write without time.
+const storeGrace = time.Second
+
+// storeContext returns the context for storing a value generated on genCtx.
+// It keeps the genCtx deadline but extends it to at least min(timeout, storeGrace)
+// from now. The context derives from base, so it is still cancelled with base
+// and never outlives a deadline set on base. Without a timeout it is base itself.
+func storeContext(genCtx, base context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		return base, func() {}
+	}
+
+	deadline := time.Now().Add(min(timeout, storeGrace))
+
+	if genDeadline, ok := genCtx.Deadline(); ok && genDeadline.After(deadline) {
+		deadline = genDeadline
+	}
+
+	return context.WithDeadline(base, deadline)
 }
 
 // randomizeTTL randomizes the TTL (time-to-live) duration by a percentage defined by persentOfRandomTTL constant.
@@ -348,12 +440,10 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 		}
 	}()
 
-	if req.Timeout > 0 {
-		var cancel context.CancelFunc
+	base := ctx
 
-		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
-	}
+	ctx, cancel := withOptionalTimeout(base, req.Timeout)
+	defer cancel()
 
 	var (
 		sfState            State
@@ -389,7 +479,7 @@ func (c *Cache) processRequest(ctx context.Context, key string, generator genera
 	case errors.Is(err, ErrKeyNotExists):
 		sfState = CacheMiss
 
-		data, err = c.generateAndSet(ctx, key, req.TTL, generator)
+		data, err = c.generateAndSet(ctx, base, key, req, generator)
 		if err != nil {
 			return nil, err
 		}
@@ -415,16 +505,10 @@ func (c *Cache) startWarmUp(key string, generator generator, req *Request) {
 	c.wg.Go(func() {
 		defer c.warmUpLocks.Delete(key)
 
-		ctx := c.ctx
+		ctx, cancel := withOptionalTimeout(c.ctx, req.Timeout)
+		defer cancel()
 
-		if req.Timeout > 0 {
-			var cancel context.CancelFunc
-
-			ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-			defer cancel()
-		}
-
-		_, err := c.generateAndSet(ctx, key, req.TTL, generator)
+		_, err := c.generateAndSet(ctx, c.ctx, key, req, generator)
 		if err != nil {
 			slog.Warn("Failed to warm up cache for key", "key", key, "error", err)
 		}
