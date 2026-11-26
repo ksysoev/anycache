@@ -77,7 +77,7 @@ func TestDecodeEntry_Invalid(t *testing.T) {
 		data    []byte
 	}{
 		{name: "empty", data: nil, wantErr: ErrCorruptEntry},
-		{name: "pass marker", data: passMarker, wantErr: ErrUnsupportedVersion},
+		{name: "pass marker", data: passMarker, wantErr: ErrCorruptEntry},
 		{name: "unknown version", data: []byte{42, 1, 2}, wantErr: ErrUnsupportedVersion},
 		{name: "truncated", data: valid[:len(valid)-3], wantErr: ErrCorruptEntry},
 		{name: "huge header count", data: []byte{entryVersion, 200, 1, 2, 0xff, 0x7f}, wantErr: ErrCorruptEntry},

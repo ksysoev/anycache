@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -138,7 +139,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "c", header: http.Header{"Set-Cookie": {"s=1"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -146,7 +147,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "c", header: http.Header{"Cache-Control": {"no-store"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -154,7 +155,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "v", header: http.Header{"Vary": {"Accept-Language"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -162,7 +163,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "c", header: http.Header{"set-cookie": {"s=1"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -170,7 +171,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "c", header: http.Header{"cache-control": {"private"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -178,7 +179,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			req:           func() *http.Request { return get("/p") },
 			handler:       &countingHandler{body: "v", header: http.Header{"vary": {"Cookie"}}},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -187,7 +188,7 @@ func TestMiddleware_CachingBehaviour(t *testing.T) {
 			handler:       &countingHandler{body: "a-very-long-body"},
 			opts:          []Option{WithMaxBodySize(4)},
 			wantCalls:     2,
-			wantStatus2:   StatusMiss,
+			wantStatus2:   StatusBypass,
 			wantHTTPCode2: http.StatusOK,
 		},
 		{
@@ -294,6 +295,14 @@ func TestMiddleware_FailOpen(t *testing.T) {
 			name: "corrupt entry is invalidated",
 			setup: func(store *anycache.MockCacheStorage) {
 				store.EXPECT().Get(mock.Anything, mock.Anything).Return([]byte{entryVersion}, nil).Once()
+				store.EXPECT().Del(mock.Anything, mock.Anything).Return(nil).Once()
+			},
+			wantStatus: StatusBypass,
+		},
+		{
+			name: "stored pass marker is invalidated",
+			setup: func(store *anycache.MockCacheStorage) {
+				store.EXPECT().Get(mock.Anything, mock.Anything).Return(passMarker, nil).Once()
 				store.EXPECT().Del(mock.Anything, mock.Anything).Return(nil).Once()
 			},
 			wantStatus: StatusBypass,
@@ -890,19 +899,23 @@ func TestMiddleware_LeaderResponseDropsTrailers(t *testing.T) {
 }
 
 func TestMiddleware_InvalidStatusIsLogged(t *testing.T) {
-	logs := &syncBuffer{}
+	for _, code := range []int{0, 42, 1000} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			logs := &syncBuffer{}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(42)
-	})
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(code)
+			})
 
-	h := newHandler(t, newMemoryCache(t), handler, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+			h := newHandler(t, newMemoryCache(t), handler, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
 
-	w := do(h, get("/p"))
+			w := do(h, get("/p"))
 
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	assert.Contains(t, logs.String(), "invalid status code")
-	assert.Contains(t, logs.String(), "status=42")
+			assert.Equal(t, http.StatusInternalServerError, w.Code)
+			assert.Contains(t, logs.String(), "invalid status code")
+			assert.Contains(t, logs.String(), "status="+strconv.Itoa(code))
+		})
+	}
 }
 
 func TestMayRunLater(t *testing.T) {
@@ -974,4 +987,80 @@ func TestMiddleware_AbortIsSharedAs502(t *testing.T) {
 
 	assert.Equal(t, int32(1), bh.calls.Load())
 	assert.Equal(t, 1, strings.Count(logs.String(), "handler aborted the response"))
+}
+
+func TestMiddleware_Finish(t *testing.T) {
+	cancelled, cancel := context.WithTimeout(t.Context(), 0)
+	defer cancel()
+
+	tests := []struct {
+		ctx     context.Context
+		pe      *panicError
+		check   func(t *testing.T, err error)
+		name    string
+		wantLog string
+	}{
+		{
+			name: "abort after the deadline is a timeout",
+			ctx:  cancelled,
+			pe:   newPanicError(http.ErrAbortHandler, nil),
+			check: func(t *testing.T, err error) {
+				t.Helper()
+
+				var te *timeoutError
+
+				assert.ErrorAs(t, err, &te)
+				assert.ErrorIs(t, err, context.DeadlineExceeded)
+			},
+			wantLog: "handler did not finish in time",
+		},
+		{
+			name: "abort in time is an abort",
+			ctx:  t.Context(),
+			pe:   newPanicError(http.ErrAbortHandler, nil),
+			check: func(t *testing.T, err error) {
+				t.Helper()
+
+				var ae *abortError
+
+				assert.ErrorAs(t, err, &ae)
+			},
+			wantLog: "handler aborted the response",
+		},
+		{
+			name: "panic in time is a panic",
+			ctx:  t.Context(),
+			pe:   newPanicError("boom", nil),
+			check: func(t *testing.T, err error) {
+				t.Helper()
+
+				var pe *panicError
+
+				assert.ErrorAs(t, err, &pe)
+			},
+			wantLog: "handler panicked",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := &syncBuffer{}
+			mw := newTestMiddleware(t, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+
+			resp, err := mw.finish(tt.ctx, newRecorder(0), tt.pe, "key")
+
+			assert.Nil(t, resp)
+			tt.check(t, err)
+			assert.Contains(t, logs.String(), tt.wantLog)
+		})
+	}
+}
+
+func TestMiddleware_PrivateResponseIsReportedAsBypass(t *testing.T) {
+	h := newHandler(t, newMemoryCache(t), &countingHandler{body: "c", header: http.Header{"Set-Cookie": {"s=1"}}})
+
+	w := do(h, get("/p"))
+
+	assert.Equal(t, "c-1", w.Body.String())
+	assert.Equal(t, StatusBypass, w.Header().Get(statusHeader), "a private response is neither stored nor shared")
 }

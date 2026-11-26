@@ -125,6 +125,10 @@ func WithMaxBodySize(n int) Option {
 //
 // Storing a response may take up to one second past d, so a handler that takes
 // most of the timeout is still cached.
+//
+// d also bounds the removal of a corrupt entry. A timeout passed through
+// WithCacheOptions(anycache.WithTimeout(...)) applies to cache calls only, not
+// to that removal.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d

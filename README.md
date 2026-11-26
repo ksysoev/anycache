@@ -160,7 +160,7 @@ See [GitHub Releases](https://github.com/ksysoev/anycache/releases) for release 
 
 ## HTTP caching middleware
 
-`github.com/ksysoev/anycache/middleware/httpcache` caches responses of HTTP handlers. It uses only the standard library and has the usual `func(http.Handler) http.Handler` shape, so it works with `net/http`, chi, gorilla and similar routers.
+`github.com/ksysoev/anycache/middleware/httpcache` caches responses of HTTP handlers. It has no dependencies beyond anycache itself and has the usual `func(http.Handler) http.Handler` shape, so it works with `net/http`, chi, gorilla and similar routers.
 
 ```go
 cache := anycache.New(store)
@@ -193,7 +193,7 @@ Behavior:
 - **Background runs:** with warm-up, or when the triggering client disconnects, the handler may run after the original request has completed. Do not use request-scoped resources from the context (database transactions, pooled buffers, spans ended by an outer middleware) in cached handlers.
 - **Fail open:** if reading from storage fails, the request is served by the handler directly and a warning is logged. If storing fails, the response is still served and shared with waiting requests. The handler never runs twice for the same request.
 - **Panics:** a panicking handler returns `500`. A handler aborting with `http.ErrAbortHandler` (for example `httputil.ReverseProxy` on a failed upstream body) returns `502 Bad Gateway`: the response is buffered, so nothing partial ever reached the client.
-- **Headers:** `Age` is set on hits, hop-by-hop headers and `Set-Cookie` are never stored.
+- **Headers:** `Age` is set on hits, hop-by-hop headers and `Set-Cookie` are never stored. The cache status header reports `HIT`, `WARM_UP` (served from cache while refreshing), `MISS` (the handler ran and the response was stored or shared) or `BYPASS` (the response was neither stored nor shared: an uncacheable request, a private response, or storage that could not be read).
 - **Invalidation:** `mw.Key(r)` returns the key for a request, to be passed to `cache.Invalidate`. Each vary-header combination has its own key.
 
 Limitations:

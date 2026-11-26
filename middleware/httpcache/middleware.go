@@ -15,9 +15,16 @@ import (
 
 // Values reported in the cache status header (see WithCacheStatusHeader).
 const (
-	StatusHit    = "HIT"
-	StatusMiss   = "MISS"
+	// StatusHit reports a response served from the cache.
+	StatusHit = "HIT"
+	// StatusMiss reports a response from the handler that was stored or shared
+	// with concurrent requests.
+	StatusMiss = "MISS"
+	// StatusWarmUp reports a response served from the cache while it is refreshed
+	// in the background.
 	StatusWarmUp = "WARM_UP"
+	// StatusBypass reports a response that was neither stored nor shared: the
+	// request was not cacheable, the response was private, or storage could not be read.
 	StatusBypass = "BYPASS"
 )
 
@@ -108,10 +115,12 @@ func (m *Middleware) serve(w http.ResponseWriter, r *http.Request, next http.Han
 		return
 	}
 
-	if isPassMarker(data) {
+	// The pass marker only ever comes from a generator run, never from storage:
+	// on a hit it is corrupt data, which writeEntry removes.
+	if state == anycache.CacheMiss && isPassMarker(data) {
 		// Only the leader holds the private response; followers run the handler themselves.
 		if resp := slot.get(); resp != nil {
-			m.writeRecorded(w, resp)
+			m.writeRecorded(w, resp, StatusBypass)
 			return
 		}
 
@@ -185,16 +194,18 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 		return nil, te
 	}
 
+	return m.finish(ctx, rec, pe, key)
+}
+
+// finish turns the outcome of a handler execution into its result. A context
+// that ended takes precedence over a panic or abort, which it may have caused.
+func (m *Middleware) finish(ctx context.Context, rec *recorder, pe *panicError, key string) (*response, error) {
 	switch {
-	case pe != nil && pe.value == http.ErrAbortHandler:
-		// The handler aborted its response, for example httputil.ReverseProxy when
-		// copying the upstream body fails. Nothing reached the client yet, since the
-		// response is buffered, so the waiting requests get a clean 502 instead.
-		m.cfg.logger.Warn("httpcache: handler aborted the response", "key", key)
-		return nil, newAbortError()
 	case ctx.Err() != nil:
 		// A handler that outlived its context may have written a partial or error
-		// response, or panicked because of the cancellation: never serve, share or store it.
+		// response, or panicked or aborted because of the cancellation (for example
+		// httputil.ReverseProxy when its upstream copy is cancelled): never serve,
+		// share or store it, and report a timeout.
 		te := newTimeoutError(context.Cause(ctx))
 
 		attrs := []any{"key", key, "error", te.cause}
@@ -205,11 +216,17 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 		m.cfg.logger.Warn("httpcache: handler did not finish in time", attrs...)
 
 		return nil, te
+	case pe != nil && pe.value == http.ErrAbortHandler:
+		// The handler aborted its response, for example httputil.ReverseProxy when
+		// copying the upstream body fails. Nothing reached the client yet, since the
+		// response is buffered, so the waiting requests get a clean 502 instead.
+		m.cfg.logger.Warn("httpcache: handler aborted the response", "key", key)
+		return nil, newAbortError()
 	case pe != nil:
 		m.cfg.logger.Error("httpcache: handler panicked", "key", key, "error", pe.value, "stack", string(pe.stack))
 		return nil, pe
 	default:
-		if rec.invalidStatus != 0 {
+		if rec.hasInvalidStatus {
 			m.cfg.logger.Warn("httpcache: handler wrote an invalid status code, responding 500", "key", key, "status", rec.invalidStatus)
 		}
 
@@ -244,7 +261,7 @@ func (m *Middleware) handleError(w http.ResponseWriter, r *http.Request, next ht
 			// Safety net: CacheC does not report storage write failures, but should
 			// the cache fail after the handler ran, never run it twice.
 			m.cfg.logger.Warn("httpcache: cache error after the handler ran", "key", key, "error", err)
-			m.writeRecorded(w, resp)
+			m.writeRecorded(w, resp, StatusMiss)
 
 			return
 		}
@@ -302,9 +319,11 @@ func (m *Middleware) invalidate(r *http.Request, key string) {
 	}
 }
 
-// writeRecorded writes the response recorded for this very request.
+// writeRecorded writes the response recorded for this very request, reporting
+// status in the cache status header: BYPASS for a private response that was
+// neither stored nor shared, MISS otherwise.
 // Trailers are dropped: their values were never recorded.
-func (m *Middleware) writeRecorded(w http.ResponseWriter, resp *response) {
+func (m *Middleware) writeRecorded(w http.ResponseWriter, resp *response, status string) {
 	h := w.Header()
 
 	for name, values := range resp.header {
@@ -315,7 +334,7 @@ func (m *Middleware) writeRecorded(w http.ResponseWriter, resp *response) {
 		h[name] = values
 	}
 
-	m.setStatus(w, StatusMiss)
+	m.setStatus(w, status)
 	m.writeBody(w, resp.status, resp.body)
 }
 

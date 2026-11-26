@@ -18,6 +18,7 @@ func TestRecorder(t *testing.T) {
 		wantStatus   int
 		wantInvalid  int
 		wantOverflow bool
+		hasInvalid   bool
 	}{
 		{
 			name:       "implicit 200 on write",
@@ -65,10 +66,18 @@ func TestRecorder(t *testing.T) {
 			wantHeader: http.Header{"Set-Cookie": {"a=1", "b=2"}, "Cache-Control": {"private"}},
 		},
 		{
+			name:       "zero status is invalid",
+			handler:    func(_ *testing.T, w http.ResponseWriter) { w.WriteHeader(0) },
+			wantStatus: http.StatusInternalServerError,
+			hasInvalid: true,
+			wantHeader: http.Header{},
+		},
+		{
 			name:        "invalid status becomes 500",
 			handler:     func(_ *testing.T, w http.ResponseWriter) { w.WriteHeader(42) },
 			wantStatus:  http.StatusInternalServerError,
 			wantInvalid: 42,
+			hasInvalid:  true,
 			wantHeader:  http.Header{},
 		},
 		{
@@ -109,6 +118,7 @@ func TestRecorder(t *testing.T) {
 			assert.Equal(t, tt.wantBody, string(resp.body))
 			assert.Equal(t, tt.wantOverflow, resp.overflow)
 			assert.Equal(t, tt.wantInvalid, rec.invalidStatus)
+			assert.Equal(t, tt.hasInvalid, rec.hasInvalidStatus)
 		})
 	}
 }

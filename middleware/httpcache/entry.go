@@ -102,9 +102,12 @@ func appendString(buf []byte, s string) []byte {
 
 // decodeEntry parses data produced by encodeEntry.
 // The returned body aliases data and must not be modified.
-// It returns ErrUnsupportedVersion for unknown versions and ErrCorruptEntry for malformed data.
+// It returns ErrUnsupportedVersion for unknown versions and ErrCorruptEntry for
+// malformed data, including the pass marker.
 func decodeEntry(data []byte) (*entry, error) {
-	if len(data) == 0 {
+	// Version 0 is the pass marker, which is never stored: finding it in storage
+	// means the data is corrupt, not that a newer format wrote it.
+	if len(data) == 0 || data[0] == passVersion {
 		return nil, ErrCorruptEntry
 	}
 
