@@ -252,27 +252,34 @@ func TestCache_SetErrorIsStillReturned(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
-func TestCacheC_StoreGetsFreshTimeout(t *testing.T) {
+func TestCacheC_StoreGetsGracePeriod(t *testing.T) {
 	store := NewMockCacheStorage(t)
 	cache := New(store)
 
-	const timeout = 50 * time.Millisecond
+	const (
+		timeout = 200 * time.Millisecond
+		margin  = 20 * time.Millisecond
+	)
 
 	store.EXPECT().Get(mock.Anything, "key").Return(nil, ErrKeyNotExists).Once()
 	store.EXPECT().Set(mock.Anything, "key", []byte("value"), time.Second).
 		RunAndReturn(func(ctx context.Context, _ string, _ []byte, _ time.Duration) error {
 			deadline, ok := ctx.Deadline()
 
-			assert.NoError(t, ctx.Err(), "store must not inherit the exhausted generator budget")
 			assert.True(t, ok, "store must still be bounded by the timeout")
-			assert.Greater(t, time.Until(deadline), timeout/2)
+			assert.Greater(t, time.Until(deadline), timeout/2, "store must get the grace period, not the generator leftover")
 
 			return nil
 		}).Once()
 
 	gen := func(ctx context.Context) ([]byte, bool, error) {
-		// Use up the whole budget, like a handler finishing right at its deadline.
-		<-ctx.Done()
+		// Finish just before the deadline, like a slow handler.
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return nil, false, errors.New("generator context has no deadline")
+		}
+
+		time.Sleep(time.Until(deadline) - margin)
 
 		return []byte("value"), true, nil
 	}
@@ -281,6 +288,58 @@ func TestCacheC_StoreGetsFreshTimeout(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []byte("value"), val)
+}
+
+func TestGenerateAndSet_LateGeneratorIsNotStored(t *testing.T) {
+	tests := []struct {
+		call    func(cache *Cache, gen func(context.Context) ([]byte, bool, error)) ([]byte, error)
+		name    string
+		wantErr bool
+	}{
+		{
+			name: "CacheC returns the value",
+			call: func(cache *Cache, gen func(context.Context) ([]byte, bool, error)) ([]byte, error) {
+				return cache.CacheC(context.Background(), "key", time.Second, gen, WithTimeout(20*time.Millisecond))
+			},
+		},
+		{
+			name: "Cache returns the error",
+			call: func(cache *Cache, gen func(context.Context) ([]byte, bool, error)) ([]byte, error) {
+				return cache.Cache(context.Background(), "key", time.Second, func(ctx context.Context) ([]byte, error) {
+					val, _, err := gen(ctx)
+					return val, err
+				}, WithTimeout(20*time.Millisecond))
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewMockCacheStorage(t)
+			cache := New(store)
+
+			// No Set expectation: the mock fails the test if the late value is stored.
+			store.EXPECT().Get(mock.Anything, "key").Return(nil, ErrKeyNotExists).Once()
+
+			// The generator ignores its deadline and returns after it.
+			gen := func(ctx context.Context) ([]byte, bool, error) {
+				<-ctx.Done()
+
+				return []byte("partial"), true, nil
+			}
+
+			val, err := tt.call(cache, gen)
+
+			if tt.wantErr {
+				assert.ErrorIs(t, err, context.DeadlineExceeded)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, []byte("partial"), val)
+		})
+	}
 }
 
 func TestStoreContext(t *testing.T) {

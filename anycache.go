@@ -291,9 +291,7 @@ func (c *Cache) Invalidate(ctx context.Context, key string) error {
 // sets it in the cache storage with the given key and options,
 // and returns the generated value and any error encountered.
 //
-// The generator runs on ctx. The value is stored within what is left of the
-// ctx deadline, but with at least storeGrace (capped at req.Timeout), so a
-// generator that used most of its budget still leaves the write time to succeed.
+// The generator runs on ctx; see store for how the value is stored.
 // When req.ignoreSetError is set, a storage failure is logged and the value is returned without error.
 func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Request, gen generator) ([]byte, error) {
 	value, cacheable, err := gen(ctx)
@@ -305,12 +303,7 @@ func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Reque
 		return value, nil
 	}
 
-	ttl := randomizeTTL(c.maxShiftTTL, req.TTL)
-
-	storeCtx, cancel := storeContext(ctx, base, req.Timeout)
-	defer cancel()
-
-	err = c.Storage.Set(storeCtx, key, value, ttl)
+	err = c.store(ctx, base, key, value, req)
 
 	switch {
 	case err == nil:
@@ -321,6 +314,24 @@ func (c *Cache) generateAndSet(ctx, base context.Context, key string, req *Reque
 	default:
 		return value, err
 	}
+}
+
+// store writes a value generated on genCtx to storage.
+//
+// A generator that returned after genCtx ended may have produced a partial
+// value, so it is never stored. Otherwise the value is stored within what is
+// left of the genCtx deadline, but with at least storeGrace (capped at
+// req.Timeout), so a generator finishing close to its deadline still leaves
+// the write time to succeed.
+func (c *Cache) store(genCtx, base context.Context, key string, value []byte, req *Request) error {
+	if err := genCtx.Err(); err != nil {
+		return fmt.Errorf("generator returned after its context ended: %w", err)
+	}
+
+	storeCtx, cancel := storeContext(genCtx, base, req.Timeout)
+	defer cancel()
+
+	return c.Storage.Set(storeCtx, key, value, randomizeTTL(c.maxShiftTTL, req.TTL))
 }
 
 // withOptionalTimeout returns a context derived from ctx that times out after

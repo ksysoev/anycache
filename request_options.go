@@ -26,7 +26,8 @@ func WithMetric(hook func(key string, op State, latency time.Duration)) CacheIte
 // caller cancellation/context values are decoupled from storage/generator execution.
 // Storing a generated value may take up to one second longer (at most the
 // timeout itself), so a generator finishing close to the deadline does not leave
-// the storage write without time.
+// the storage write without time. A value returned after the timeout expired
+// may be partial and is not stored.
 func WithTimeout(timeout time.Duration) CacheItemOptions {
 	return func(req *Request) {
 		req.Timeout = timeout

@@ -115,7 +115,7 @@ if err := cache.Invalidate(ctx, "user:profile"); err != nil {
 
 - `WithWarmUpTTL(d)` — if remaining TTL is below `d`, serve current value and refresh in background.
 - `WithMetric(hook)` — override metric hook for one call.
-- `WithTimeout(d)` — timeout for internal storage + generation work. Storing a generated value may take up to 1s past it.
+- `WithTimeout(d)` — timeout for internal storage + generation work. Storing a generated value may take up to 1s past it; a value returned after the timeout expired is not stored.
 - `WithShouldCache(func(any) bool)` — decide per result whether to persist generated data.
 
 Metric states: `hit`, `miss`, `warm_up`, `error`.

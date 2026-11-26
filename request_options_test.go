@@ -1,6 +1,7 @@
 package anycache
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -13,7 +14,15 @@ func TestCacheWarmingUp(t *testing.T) {
 	cache := New(store)
 
 	store.EXPECT().GetWithTTL(mock.Anything, "TestCacheWarmingUpKey").Return([]byte("testValue"), 500*time.Millisecond, nil)
-	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).Return(nil)
+
+	stored := make(chan struct{})
+
+	store.EXPECT().Set(mock.Anything, "TestCacheWarmingUpKey", []byte("newTestValue"), 2*time.Second).
+		RunAndReturn(func(context.Context, string, []byte, time.Duration) error {
+			close(stored)
+
+			return nil
+		})
 
 	val, err := cache.Cache(t.Context(), "TestCacheWarmingUpKey", 2*time.Second, getGenerator([]byte("newTestValue"), nil), WithWarmUpTTL(1*time.Second))
 	if err != nil {
@@ -22,6 +31,8 @@ func TestCacheWarmingUp(t *testing.T) {
 
 	assert.Equal(t, []byte("testValue"), val, "Expected to get testValue, but got '%v'", val)
 
+	// Close cancels in-flight warm-ups, so wait for the refresh to be stored first.
+	<-stored
 	assert.NoError(t, cache.Close())
 }
 
