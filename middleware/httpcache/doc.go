@@ -46,8 +46,13 @@
 // The storage read shares the timeout with the handler: a read that times out
 // fails open, but a slow read that then misses leaves the handler only the rest
 // of the timeout. A handler panic produces a 500 response, and a handler that
-// aborts with http.ErrAbortHandler produces a 502: the response is buffered, so
-// nothing partial ever reached the client.
+// aborts with http.ErrAbortHandler produces a 502: a response within
+// WithMaxBodySize is buffered, so nothing partial ever reached the client. Once
+// an oversized response started streaming (see below), a panic, abort or
+// timeout aborts the connection of the request that ran the handler instead,
+// with panic(http.ErrAbortHandler), so the client never takes the partial body
+// for a complete one. The other waiting requests were already released when the
+// response outgrew the limit and run the handler themselves.
 // Trailers are not supported and are dropped, and 101 Switching Protocols
 // responses are never stored or shared.
 //
@@ -61,11 +66,34 @@
 //
 // # Streaming and memory
 //
-// Responses are buffered in memory until the handler returns: Flush is a no-op
-// and Hijack is unsupported. Upgrade and event-stream requests bypass the cache,
-// but routes serving SSE or websockets should still not use the middleware. WithMaxBodySize only controls whether a response is stored;
-// larger responses are still buffered in full, so do not wrap routes serving
-// large downloads or files.
+// Responses are buffered in memory until the handler returns, up to
+// WithMaxBodySize. When a response outgrows the limit, the buffered part and the
+// rest of the body are streamed to the request that ran the handler, with the
+// BYPASS cache status, the handler's headers (its Content-Length if it set one,
+// chunked encoding otherwise) and working Flush; the response is neither stored
+// nor shared: concurrent requests waiting for it are released as soon as it
+// outgrows the limit and run the handler themselves, also streaming, so a slow
+// client never holds them. Memory per response therefore stays bounded by
+// WithMaxBodySize plus the write in progress, so routes serving large downloads
+// can be wrapped. WithTimeout still bounds the whole handler run, streaming
+// included, so raise it for slow downloads; when it expires, or the client goes
+// away, mid-stream, the handler context is cancelled and the connection aborted.
+// A client that stopped reading can only be aborted if its writer supports
+// write deadlines (http.ResponseController.SetWriteDeadline: wrapping writers
+// must implement Unwrap) or the server sets http.Server.WriteTimeout; otherwise
+// the request waits until the stalled write fails. Closing the cache does not
+// cancel a response that is already streaming. When the response has no client to
+// stream to (a WithWarmUpTTL refresh, or a client that went away) the oversized
+// body is discarded and the handler's writes fail, so it can stop early. The
+// exception is a refresh that outgrows the limit before the request that
+// triggered it got the cached response: it streams to that request instead,
+// which then receives the fresh body reported as BYPASS rather than the cached
+// one. A handler aborting with http.ErrAbortHandler on such a failed write (as
+// httputil.ReverseProxy does) is not reported as a 502 to the waiting requests,
+// which run the handler themselves.
+// Before the limit is reached Flush is a no-op, and Hijack is unsupported.
+// Upgrade and event-stream requests bypass the cache, but routes serving SSE or
+// websockets should still not use the middleware.
 //
 // # Keys and invalidation
 //

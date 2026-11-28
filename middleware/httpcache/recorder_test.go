@@ -1,11 +1,14 @@
 package httpcache
 
 import (
+	"bytes"
+	"errors"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestRecorder(t *testing.T) {
@@ -90,17 +93,19 @@ func TestRecorder(t *testing.T) {
 			wantHeader: http.Header{},
 		},
 		{
-			name: "overflow keeps full body",
+			name: "overflow without sink is discarded",
 			handler: func(t *testing.T, w http.ResponseWriter) {
 				t.Helper()
 
 				_, _ = w.Write([]byte("1234"))
 				assert.NoError(t, http.NewResponseController(w).Flush())
-				_, _ = w.Write([]byte("5678"))
+
+				_, err := w.Write([]byte("5678"))
+				assert.ErrorIs(t, err, errStreamDetached)
 			},
 			maxBody:      5,
 			wantStatus:   http.StatusOK,
-			wantBody:     "12345678",
+			wantBody:     "",
 			wantHeader:   http.Header{},
 			wantOverflow: true,
 		},
@@ -108,7 +113,7 @@ func TestRecorder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := newRecorder(tt.maxBody)
+			rec := newRecorder(tt.maxBody, nil)
 			tt.handler(t, rec)
 
 			resp := rec.result(time.Now())
@@ -124,11 +129,246 @@ func TestRecorder(t *testing.T) {
 }
 
 func TestRecorder_NoHijackOrUnwrap(t *testing.T) {
-	var w http.ResponseWriter = newRecorder(0)
+	var w http.ResponseWriter = newRecorder(0, nil)
 
 	_, isHijacker := w.(http.Hijacker)
 	_, isUnwrapper := w.(interface{ Unwrap() http.ResponseWriter })
 
 	assert.False(t, isHijacker)
 	assert.False(t, isUnwrapper)
+}
+
+// fakeSink records what a recorder streams.
+type fakeSink struct {
+	startErr  error
+	writeErr  error
+	header    http.Header
+	buffered  []byte
+	first     []byte
+	written   bytes.Buffer
+	status    int
+	starts    int
+	flushes   int
+	startSize int
+	// startN is the number of bytes of p reported written when startErr is set.
+	startN int
+}
+
+func (s *fakeSink) startStream(status int, header http.Header, buffered, p []byte) (int, error) {
+	s.starts++
+	s.status = status
+	s.header = header
+	s.startSize = len(buffered)
+	s.buffered = append([]byte(nil), buffered...)
+	s.first = append([]byte(nil), p...)
+
+	if s.startErr != nil {
+		return s.startN, s.startErr
+	}
+
+	return len(p), nil
+}
+
+func (s *fakeSink) write(p []byte) (int, error) {
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
+
+	return s.written.Write(p)
+}
+
+func (s *fakeSink) flush() error {
+	s.flushes++
+	return nil
+}
+
+var errClientGone = errors.New("client gone")
+
+func TestRecorder_Streaming(t *testing.T) {
+	tests := []struct {
+		startErr     error
+		writeErr     error
+		name         string
+		writes       []string
+		wantBuffered string
+		wantFirst    string
+		wantStreamed string
+		wantBody     string
+		wantErrs     []error
+		wantStarts   int
+		wantFlushes  int
+		flushAfter   int
+		maxBody      int
+		startN       int
+		wantOverflow bool
+		wantLost     bool
+	}{
+		{
+			name:       "under the limit is buffered",
+			maxBody:    8,
+			writes:     []string{"1234", "5678"},
+			flushAfter: 1,
+			wantBody:   "12345678",
+			wantErrs:   []error{nil, nil},
+		},
+		{
+			name:       "no limit never streams",
+			maxBody:    0,
+			writes:     []string{"1234", "5678"},
+			flushAfter: 1,
+			wantBody:   "12345678",
+			wantErrs:   []error{nil, nil},
+		},
+		{
+			name:         "crossing the limit streams the rest",
+			maxBody:      5,
+			writes:       []string{"1234", "5678", "90"},
+			flushAfter:   2,
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantStreamed: "90",
+			wantErrs:     []error{nil, nil, nil},
+			wantStarts:   1,
+			wantFlushes:  1,
+			wantOverflow: true,
+		},
+		{
+			name:         "failed stream start loses the client and discards the rest",
+			maxBody:      5,
+			startErr:     errClientGone,
+			writes:       []string{"1234", "5678", "90"},
+			flushAfter:   2,
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, errClientGone, errClientGone},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client write failing during the stream start reports the bytes written",
+			maxBody:      5,
+			startErr:     errClientGone,
+			startN:       2,
+			writes:       []string{"1234", "5678", "90"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, errClientGone, errClientGone},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client write failing mid-stream loses the client",
+			maxBody:      5,
+			writeErr:     errClientGone,
+			writes:       []string{"1234", "5678", "90"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, nil, errClientGone},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "stream start without a client loses the client",
+			maxBody:      5,
+			startErr:     errStreamDetached,
+			writes:       []string{"1234", "5678"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, errStreamDetached},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client detached mid-stream loses the client",
+			maxBody:      5,
+			writeErr:     errStreamDetached,
+			writes:       []string{"1234", "5678", "90"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, nil, errStreamDetached},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sink := &fakeSink{startErr: tt.startErr, writeErr: tt.writeErr, startN: tt.startN}
+			rec := newRecorder(tt.maxBody, sink)
+			rec.Header().Set("X-Test", "1")
+
+			for i, chunk := range tt.writes {
+				starts := sink.starts
+				n, err := rec.Write([]byte(chunk))
+
+				if tt.wantErrs[i] != nil {
+					assert.ErrorIs(t, err, tt.wantErrs[i])
+
+					wantN := 0
+					if sink.starts > starts {
+						// The write that started the stream reports the bytes the sink wrote.
+						wantN = tt.startN
+					}
+
+					assert.Equal(t, wantN, n)
+				} else {
+					assert.NoError(t, err)
+					assert.Equal(t, len(chunk), n)
+				}
+
+				if i+1 == tt.flushAfter {
+					rec.Flush()
+				}
+			}
+
+			resp := rec.result(time.Now())
+
+			assert.Equal(t, tt.wantStarts, sink.starts)
+			assert.Equal(t, tt.wantFlushes, sink.flushes)
+			assert.Equal(t, tt.wantBuffered, string(sink.buffered))
+			assert.Equal(t, tt.wantFirst, string(sink.first))
+			assert.Equal(t, tt.wantStreamed, sink.written.String())
+			assert.Equal(t, tt.wantBody, string(resp.body))
+			assert.Equal(t, tt.wantOverflow, resp.overflow)
+			assert.Equal(t, tt.wantLost, rec.lostClient())
+			assert.Equal(t, http.StatusOK, resp.status)
+
+			if tt.wantStarts > 0 {
+				assert.Equal(t, http.StatusOK, sink.status)
+				assert.Equal(t, http.Header{"X-Test": {"1"}}, sink.header)
+			}
+		})
+	}
+}
+
+func TestRecorder_MemoryIsBoundedByMaxBody(t *testing.T) {
+	const (
+		maxBody = 1 << 10
+		chunk   = 100
+	)
+
+	sink := &fakeSink{}
+	rec := newRecorder(maxBody, sink)
+	p := bytes.Repeat([]byte("x"), chunk)
+
+	const writes = 10 * maxBody / chunk
+
+	for range writes {
+		_, err := rec.Write(p)
+		require.NoError(t, err)
+
+		assert.LessOrEqual(t, rec.body.Len(), maxBody, "never more than maxBody is buffered")
+		// bytes.Buffer at most doubles its capacity when it grows.
+		assert.LessOrEqual(t, rec.body.Cap(), 2*maxBody, "the buffer must stay bounded by the limit")
+	}
+
+	assert.Equal(t, 1, sink.starts)
+	assert.LessOrEqual(t, sink.startSize, maxBody)
+	assert.Zero(t, rec.body.Cap(), "the buffer is released once streaming started")
+	assert.Equal(t, writes*chunk, sink.startSize+len(sink.first)+sink.written.Len())
 }
