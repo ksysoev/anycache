@@ -2,6 +2,7 @@ package httpcache
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/textproto"
 	"time"
@@ -49,8 +50,9 @@ type recorder struct {
 	sink     streamSink
 	header   http.Header
 	snapshot http.Header
-	// streamErr is the error that prevented streaming the overflowed response;
-	// further writes are discarded and fail with it.
+	// streamErr is the error that prevented streaming the overflowed response,
+	// in which case further writes are discarded and fail with it, or
+	// errStreamDetached once a stream in progress lost its client.
 	streamErr error
 	body      bytes.Buffer
 	maxBody   int
@@ -144,7 +146,12 @@ func (r *recorder) Write(p []byte) (int, error) {
 
 	switch {
 	case r.streaming:
-		return r.sink.write(p)
+		n, err := r.sink.write(p)
+		if errors.Is(err, errStreamDetached) {
+			r.streamErr = err
+		}
+
+		return n, err
 	case r.streamErr != nil:
 		return 0, r.streamErr
 	case r.maxBody > 0 && r.body.Len()+len(p) > r.maxBody:
@@ -174,6 +181,12 @@ func (r *recorder) startStream(p []byte) (int, error) {
 	r.streaming = true
 
 	return len(p), nil
+}
+
+// lostClient reports whether the response overflowed and had no client left to
+// stream to: the stream could not start or its client detached mid-stream.
+func (r *recorder) lostClient() bool {
+	return r.overflow && errors.Is(r.streamErr, errStreamDetached)
 }
 
 // Flush flushes the streamed response to the client. It is a no-op while the

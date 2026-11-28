@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -993,12 +994,25 @@ func TestMiddleware_Finish(t *testing.T) {
 	cancelled, cancel := context.WithTimeout(t.Context(), 0)
 	defer cancel()
 
+	// lostClient returns a recorder whose oversized response had no client to stream to.
+	lostClient := func(t *testing.T) *recorder {
+		t.Helper()
+
+		rec := newRecorder(1, nil)
+		_, err := rec.Write([]byte("xx"))
+		require.ErrorIs(t, err, errStreamDetached)
+
+		return rec
+	}
+
 	tests := []struct {
-		ctx     context.Context
-		pe      *panicError
-		check   func(t *testing.T, err error)
-		name    string
-		wantLog string
+		ctx      context.Context
+		pe       *panicError
+		rec      func(t *testing.T) *recorder
+		check    func(t *testing.T, err error)
+		name     string
+		wantLog  string
+		wantResp bool
 	}{
 		{
 			name: "abort after the deadline is a timeout",
@@ -1028,9 +1042,36 @@ func TestMiddleware_Finish(t *testing.T) {
 			wantLog: "handler aborted the response",
 		},
 		{
+			name: "abort without a client to stream to is a pass",
+			ctx:  t.Context(),
+			pe:   newPanicError(http.ErrAbortHandler, nil),
+			rec:  lostClient,
+			check: func(t *testing.T, err error) {
+				t.Helper()
+
+				assert.NoError(t, err)
+			},
+			wantLog:  "no client to stream to",
+			wantResp: true,
+		},
+		{
 			name: "panic in time is a panic",
 			ctx:  t.Context(),
 			pe:   newPanicError("boom", nil),
+			check: func(t *testing.T, err error) {
+				t.Helper()
+
+				var pe *panicError
+
+				assert.ErrorAs(t, err, &pe)
+			},
+			wantLog: "handler panicked",
+		},
+		{
+			name: "panic without a client to stream to is a panic",
+			ctx:  t.Context(),
+			pe:   newPanicError("boom", nil),
+			rec:  lostClient,
 			check: func(t *testing.T, err error) {
 				t.Helper()
 
@@ -1045,11 +1086,22 @@ func TestMiddleware_Finish(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logs := &syncBuffer{}
-			mw := newTestMiddleware(t, WithLogger(slog.New(slog.NewTextHandler(logs, nil))))
+			mw := newTestMiddleware(t, WithLogger(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))))
 
-			resp, err := mw.finish(tt.ctx, newRecorder(0, nil), tt.pe, "key")
+			rec := newRecorder(0, nil)
+			if tt.rec != nil {
+				rec = tt.rec(t)
+			}
 
-			assert.Nil(t, resp)
+			resp, err := mw.finish(context.Cause(tt.ctx), rec, tt.pe, "key")
+
+			if tt.wantResp {
+				require.NotNil(t, resp)
+				assert.True(t, resp.overflow, "the response is passed, never stored or shared")
+			} else {
+				assert.Nil(t, resp)
+			}
+
 			tt.check(t, err)
 			assert.Contains(t, logs.String(), tt.wantLog)
 		})
@@ -1464,80 +1516,227 @@ func TestMiddleware_WarmUpOversizedResponseWritesNowhere(t *testing.T) {
 	assert.Equal(t, "stale", w.body.String())
 }
 
-func TestMiddleware_WarmUpStreamingBeforeDetachIsCompleted(t *testing.T) {
-	overflowed := make(chan struct{})
-	release := make(chan struct{})
-	handlerErr := make(chan error, 1)
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(chunk(2 * streamLimit))
-
-		close(overflowed)
-		<-release
-
-		_, err := w.Write([]byte("rest"))
-		handlerErr <- err
-	})
-
-	// The hook runs before CacheC returns: holding it until the warm-up run
-	// streamed makes the race between the warm-up and detach deterministic.
-	cache := anycache.New(staleStore(t), anycache.WithMetricHook(func(_ string, op anycache.State, _ time.Duration) {
-		if op == anycache.CacheWarmUp {
-			<-overflowed
-		}
-	}))
-
-	h := newHandler(t, cache, handler, WithMaxBodySize(streamLimit), WithWarmUpTTL(time.Minute))
-
-	w := newGuardWriter(t)
-	served := make(chan any, 1)
-
-	go func() { served <- serveGuarded(h, w, get("/p")) }()
-
-	select {
-	case <-served:
-		t.Fatal("the request returned while the warm-up run was still streaming to it")
-	case <-time.After(50 * time.Millisecond):
+func TestMiddleware_WarmUpStreamingBeforeDetach(t *testing.T) {
+	tests := []struct {
+		name string
+		// rest finishes the response once the handler is released.
+		rest      func(w http.ResponseWriter) error
+		wantPanic any
+		wantBody  string
+	}{
+		{
+			name: "completed response is kept",
+			rest: func(w http.ResponseWriter) error {
+				_, err := w.Write([]byte("rest"))
+				return err
+			},
+			wantBody: string(chunk(2*streamLimit)) + "rest",
+		},
+		{
+			name:      "failed response is aborted",
+			rest:      func(http.ResponseWriter) error { panic("boom") },
+			wantPanic: http.ErrAbortHandler,
+		},
 	}
 
-	close(release)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overflowed := make(chan struct{})
+			release := make(chan struct{})
+			handlerErr := make(chan error, 1)
 
-	assert.Nil(t, <-served, "a completed streamed response is not aborted")
-	assert.NoError(t, <-handlerErr)
-	assert.NoError(t, cache.Close())
-	assert.Equal(t, http.StatusOK, w.status)
-	assert.Equal(t, string(chunk(2*streamLimit))+"rest", w.body.String())
-	assert.NotContains(t, w.body.String(), "stale")
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(chunk(2 * streamLimit))
+
+				close(overflowed)
+				<-release
+
+				handlerErr <- tt.rest(w)
+			})
+
+			// The hook runs before CacheC returns: holding it until the warm-up run
+			// streamed makes the race between the warm-up and detach deterministic.
+			cache := anycache.New(staleStore(t), anycache.WithMetricHook(func(_ string, op anycache.State, _ time.Duration) {
+				if op == anycache.CacheWarmUp {
+					<-overflowed
+				}
+			}))
+
+			h := newHandler(t, cache, handler, WithMaxBodySize(streamLimit), WithWarmUpTTL(time.Minute))
+
+			w := newGuardWriter(t)
+			served := make(chan any, 1)
+
+			go func() { served <- serveGuarded(h, w, get("/p")) }()
+
+			select {
+			case <-served:
+				t.Fatal("the request returned while the warm-up run was still streaming to it")
+			case <-time.After(50 * time.Millisecond):
+			}
+
+			close(release)
+
+			assert.Equal(t, tt.wantPanic, <-served)
+			assert.NoError(t, cache.Close())
+			assert.Equal(t, http.StatusOK, w.status)
+			assert.NotContains(t, w.body.String(), "stale")
+
+			if tt.wantPanic == nil {
+				assert.NoError(t, <-handlerErr)
+				assert.Equal(t, tt.wantBody, w.body.String())
+			}
+		})
+	}
 }
 
-func TestMiddleware_WarmUpStreamingBeforeDetachFailsIsAborted(t *testing.T) {
-	overflowed := make(chan struct{})
+func TestMiddleware_FollowersAreReleasedAtOverflow(t *testing.T) {
+	started := make(chan struct{})
 	release := make(chan struct{})
+	hold := make(chan struct{})
+
+	var calls atomic.Int32
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write(chunk(2 * streamLimit))
+		if calls.Add(1) > 1 {
+			_, _ = w.Write(chunk(2 * streamLimit))
+			_, _ = w.Write([]byte("follower"))
 
-		close(overflowed)
+			return
+		}
+
+		close(started)
 		<-release
 
-		panic("boom")
+		_, _ = w.Write(chunk(2 * streamLimit))
+
+		// The leader's stream stays open until the follower got its response.
+		<-hold
+
+		_, _ = w.Write([]byte("leader"))
 	})
 
-	cache := anycache.New(staleStore(t), anycache.WithMetricHook(func(_ string, op anycache.State, _ time.Duration) {
-		if op == anycache.CacheWarmUp {
-			<-overflowed
-		}
-	}))
+	gate := &entryGate{}
+	h := gate.wrap(newHandler(t, newMemoryCache(t), handler, WithMaxBodySize(streamLimit)))
 
-	h := newHandler(t, cache, handler, WithMaxBodySize(streamLimit), WithWarmUpTTL(time.Minute))
+	leader := newGuardWriter(t)
+	leaderDone := make(chan any, 1)
 
-	w := newGuardWriter(t)
-	served := make(chan any, 1)
+	go func() { leaderDone <- serveGuarded(h, leader, get("/p")) }()
 
-	go func() { served <- serveGuarded(h, w, get("/p")) }()
+	<-started
 
+	followerDone := make(chan *httptest.ResponseRecorder, 1)
+
+	go func() { followerDone <- do(h, get("/p")) }()
+
+	gate.wait(t, 2)
 	close(release)
 
-	assert.Equal(t, http.ErrAbortHandler, <-served, "a streamed warm-up response that failed is aborted")
-	assert.NoError(t, cache.Close())
+	select {
+	case follower := <-followerDone:
+		assert.Equal(t, http.StatusOK, follower.Code)
+		assert.Equal(t, string(chunk(2*streamLimit))+"follower", follower.Body.String())
+		assert.Equal(t, StatusBypass, follower.Header().Get(statusHeader))
+	case <-time.After(5 * time.Second):
+		close(hold)
+		t.Fatal("the follower waited for the leader's stream instead of being released at overflow")
+	}
+
+	close(hold)
+
+	assert.Nil(t, <-leaderDone, "a completed streamed response is not aborted")
+	assert.Equal(t, string(chunk(2*streamLimit))+"leader", leader.body.String())
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+func TestMiddleware_AbortWithoutClientToStreamToIsPassed(t *testing.T) {
+	logs := &syncBuffer{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	var calls atomic.Int32
+
+	// Like httputil.ReverseProxy, the handler aborts when writing the body fails.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := calls.Add(1)
+		if n == 1 {
+			close(started)
+			<-release
+		}
+
+		if _, err := w.Write(chunk(2 * streamLimit)); err != nil {
+			panic(http.ErrAbortHandler)
+		}
+
+		_, _ = fmt.Fprintf(w, "-%d", n)
+	})
+
+	h := newHandler(t, newMemoryCache(t), handler,
+		WithMaxBodySize(streamLimit),
+		WithLogger(slog.New(slog.NewTextHandler(logs, nil))),
+	)
+
+	_, follower := serveWithCancelledLeader(t, h, started, func() { close(release) })
+
+	assert.Equal(t, http.StatusOK, follower.Code, "the follower reruns the handler instead of getting a 502")
+	assert.Equal(t, string(chunk(2*streamLimit))+"-2", follower.Body.String())
+	assert.NotContains(t, logs.String(), "handler aborted the response")
+}
+
+func TestMiddleware_TimeoutWhileClientDoesNotRead(t *testing.T) {
+	returned := make(chan struct{})
+	handlerErr := make(chan error, 1)
+
+	// The handler ignores its context and writes until a write fails.
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		for {
+			if _, err := w.Write(chunk(32 << 10)); err != nil {
+				handlerErr <- err
+				return
+			}
+		}
+	})
+
+	h := newHandler(t, newMemoryCache(t), handler, WithMaxBodySize(streamLimit), WithTimeout(200*time.Millisecond))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(returned)
+
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	conn, err := net.Dial("tcp", srv.Listener.Addr().String())
+	require.NoError(t, err)
+
+	defer func() { _ = conn.Close() }()
+
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		require.NoError(t, tcp.SetReadBuffer(4<<10))
+	}
+
+	_, err = io.WriteString(conn, "GET /p HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	require.NoError(t, err)
+
+	// The client reads nothing until the request is over.
+	select {
+	case <-returned:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ServeHTTP did not return after the timeout while its client was not reading")
+	}
+
+	assert.Error(t, <-handlerErr, "the stalled write fails")
+
+	require.NoError(t, conn.SetReadDeadline(time.Now().Add(10*time.Second)))
+
+	data, err := io.ReadAll(conn)
+
+	var ne net.Error
+	if errors.As(err, &ne) {
+		assert.False(t, ne.Timeout(), "the connection is closed, not left open")
+	}
+
+	assert.True(t, bytes.HasPrefix(data, []byte("HTTP/1.1 200 OK")))
+	assert.False(t, bytes.HasSuffix(data, []byte("0\r\n\r\n")), "the aborted response is not terminated")
 }

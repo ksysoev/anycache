@@ -141,6 +141,7 @@ func TestRecorder_NoHijackOrUnwrap(t *testing.T) {
 // fakeSink records what a recorder streams.
 type fakeSink struct {
 	startErr  error
+	writeErr  error
 	header    http.Header
 	buffered  []byte
 	first     []byte
@@ -163,6 +164,10 @@ func (s *fakeSink) startStream(status int, header http.Header, buffered, p []byt
 }
 
 func (s *fakeSink) write(p []byte) (int, error) {
+	if s.writeErr != nil {
+		return 0, s.writeErr
+	}
+
 	return s.written.Write(p)
 }
 
@@ -176,6 +181,7 @@ var errClientGone = errors.New("client gone")
 func TestRecorder_Streaming(t *testing.T) {
 	tests := []struct {
 		startErr     error
+		writeErr     error
 		name         string
 		writes       []string
 		wantBuffered string
@@ -188,6 +194,7 @@ func TestRecorder_Streaming(t *testing.T) {
 		flushAfter   int
 		maxBody      int
 		wantOverflow bool
+		wantLost     bool
 	}{
 		{
 			name:       "under the limit is buffered",
@@ -230,11 +237,35 @@ func TestRecorder_Streaming(t *testing.T) {
 			wantStarts:   1,
 			wantOverflow: true,
 		},
+		{
+			name:         "stream start without a client loses the client",
+			maxBody:      5,
+			startErr:     errStreamDetached,
+			writes:       []string{"1234", "5678"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, errStreamDetached},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client detached mid-stream loses the client",
+			maxBody:      5,
+			writeErr:     errStreamDetached,
+			writes:       []string{"1234", "5678", "90"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, nil, errStreamDetached},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sink := &fakeSink{startErr: tt.startErr}
+			sink := &fakeSink{startErr: tt.startErr, writeErr: tt.writeErr}
 			rec := newRecorder(tt.maxBody, sink)
 			rec.Header().Set("X-Test", "1")
 
@@ -263,6 +294,7 @@ func TestRecorder_Streaming(t *testing.T) {
 			assert.Equal(t, tt.wantStreamed, sink.written.String())
 			assert.Equal(t, tt.wantBody, string(resp.body))
 			assert.Equal(t, tt.wantOverflow, resp.overflow)
+			assert.Equal(t, tt.wantLost, rec.lostClient())
 			assert.Equal(t, http.StatusOK, resp.status)
 
 			if tt.wantStarts > 0 {

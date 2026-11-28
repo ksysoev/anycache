@@ -51,7 +51,8 @@
 // an oversized response started streaming (see below), a panic, abort or
 // timeout aborts the connection of the request that ran the handler instead,
 // with panic(http.ErrAbortHandler), so the client never takes the partial body
-// for a complete one; the other waiting requests still get the 500, 502 or 504.
+// for a complete one. The other waiting requests were already released when the
+// response outgrew the limit and run the handler themselves.
 // Trailers are not supported and are dropped, and 101 Switching Protocols
 // responses are never stored or shared.
 //
@@ -70,13 +71,20 @@
 // rest of the body are streamed to the request that ran the handler, with the
 // BYPASS cache status, the handler's headers (its Content-Length if it set one,
 // chunked encoding otherwise) and working Flush; the response is neither stored
-// nor shared, and concurrent requests for it run the handler themselves, also
-// streaming. Memory per response therefore stays bounded by WithMaxBodySize plus
-// the write in progress, so routes serving large downloads can be wrapped.
-// WithTimeout still bounds the whole handler run, streaming included, so raise
-// it for slow downloads. When the response has no client to stream to (a
-// WithWarmUpTTL refresh, or a client that went away) the oversized body is
-// discarded and the handler's writes fail, so it can stop early.
+// nor shared: concurrent requests waiting for it are released as soon as it
+// outgrows the limit and run the handler themselves, also streaming, so a slow
+// client never holds them. Memory per response therefore stays bounded by
+// WithMaxBodySize plus the write in progress, so routes serving large downloads
+// can be wrapped. WithTimeout still bounds the whole handler run, streaming
+// included, so raise it for slow downloads; when it expires, or the client goes
+// away, mid-stream, the handler context is cancelled and the connection aborted,
+// even when the client stopped reading. Closing the cache does not cancel a
+// response that is already streaming. When the response has no client to
+// stream to (a WithWarmUpTTL refresh, or a client that went away) the oversized
+// body is discarded and the handler's writes fail, so it can stop early; a
+// handler aborting with http.ErrAbortHandler on such a failed write (as
+// httputil.ReverseProxy does) is not reported as a 502 to the waiting requests,
+// which run the handler themselves.
 // Before the limit is reached Flush is a no-op, and Hijack is unsupported.
 // Upgrade and event-stream requests bypass the cache, but routes serving SSE or
 // websockets should still not use the middleware.

@@ -20,7 +20,7 @@ func TestDetach(t *testing.T) {
 			run: func(t *testing.T, values context.Context, cancelValues context.CancelFunc) {
 				t.Helper()
 
-				ctx, cancel := detach(values, context.Background())
+				ctx, cancel, _ := detach(values, context.Background())
 				defer cancel()
 
 				cancelValues()
@@ -37,7 +37,7 @@ func TestDetach(t *testing.T) {
 				lifetime, cancelLifetime := context.WithTimeout(context.Background(), time.Hour)
 				defer cancelLifetime()
 
-				ctx, cancel := detach(values, lifetime)
+				ctx, cancel, _ := detach(values, lifetime)
 				defer cancel()
 
 				want, _ := lifetime.Deadline()
@@ -54,7 +54,7 @@ func TestDetach(t *testing.T) {
 
 				lifetime, cancelLifetime := context.WithCancel(context.Background())
 
-				ctx, cancel := detach(values, lifetime)
+				ctx, cancel, _ := detach(values, lifetime)
 				defer cancel()
 
 				cancelLifetime()
@@ -64,11 +64,35 @@ func TestDetach(t *testing.T) {
 			},
 		},
 		{
+			name: "unlinked context outlives lifetime context but keeps its deadline",
+			run: func(t *testing.T, values context.Context, _ context.CancelFunc) {
+				t.Helper()
+
+				lifetime, cancelLifetime := context.WithTimeout(context.Background(), time.Hour)
+
+				ctx, cancel, unlink := detach(values, lifetime)
+				defer cancel()
+
+				unlink()
+				cancelLifetime()
+
+				want, _ := lifetime.Deadline()
+				got, ok := ctx.Deadline()
+
+				assert.True(t, ok)
+				assert.Equal(t, want, got)
+				assert.Never(t, func() bool { return ctx.Err() != nil }, 20*time.Millisecond, time.Millisecond)
+
+				cancel()
+				assert.Error(t, ctx.Err())
+			},
+		},
+		{
 			name: "cancel func releases context",
 			run: func(t *testing.T, values context.Context, _ context.CancelFunc) {
 				t.Helper()
 
-				ctx, cancel := detach(values, context.Background())
+				ctx, cancel, _ := detach(values, context.Background())
 				cancel()
 
 				assert.Error(t, ctx.Err())
