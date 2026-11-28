@@ -100,8 +100,11 @@ func WithCacheStatusHeader(name string) Option {
 	}
 }
 
-// WithMaxBodySize sets the maximum size of a stored response body.
-// Larger responses are served but neither stored nor shared. Zero or less disables the limit.
+// WithMaxBodySize sets the maximum size of a stored response body, which is
+// also the most a response is buffered in memory (DefaultMaxBodySize by default).
+// A larger response is streamed to the requesting client once it outgrows the
+// limit and is neither stored nor shared. Zero or less disables the limit:
+// every response is buffered in full and may be stored.
 func WithMaxBodySize(n int) Option {
 	return func(c *config) {
 		c.maxBodySize = n
@@ -116,7 +119,9 @@ func WithMaxBodySize(n int) Option {
 // its context is cancelled, its output is discarded and the requests waiting for
 // the response get 504 Gateway Timeout (503 when the cache is closing) at once.
 // A handler that ignores its context keeps running in the background until it
-// returns.
+// returns. The timeout also bounds a response streamed past WithMaxBodySize: if
+// it expires mid-stream, the connection of the streaming request is aborted,
+// so allow enough time for large downloads.
 //
 // Zero or less disables the middleware timeout; the shared work is then bounded
 // only by the context deadline of the request that started it. Requests served

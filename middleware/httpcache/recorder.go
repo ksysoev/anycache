@@ -12,7 +12,8 @@ const (
 	maxStatusCode = 999
 )
 
-// response is a fully buffered handler response.
+// response is a recorded handler response. The body of an overflowed response
+// is empty: it was streamed to the leader or discarded.
 type response struct {
 	createdAt time.Time
 	header    http.Header
@@ -21,30 +22,55 @@ type response struct {
 	overflow  bool
 }
 
-// recorder is a buffering http.ResponseWriter used to capture a handler response.
+// streamSink receives a response that outgrew the size limit, so that it can be
+// streamed to the client instead of buffered. It is implemented by *leaderSlot.
+// All methods are called from the handler goroutine.
+type streamSink interface {
+	// startStream sends the status, the header and the bytes recorded so far,
+	// followed by p. It returns errStreamDetached when there is no client to
+	// stream to, or the error of writing to the client.
+	startStream(status int, header http.Header, buffered, p []byte) error
+	// write sends p to the client once the stream started.
+	write(p []byte) (int, error)
+	// flush flushes the data streamed so far to the client.
+	flush() error
+}
+
+// recorder is an http.ResponseWriter used to capture a handler response.
 //
-// It snapshots headers when the status is written, ignores 1xx informational
-// responses, treats Flush as a no-op and does not support Hijack or Unwrap, so
-// handlers cannot reach the underlying connection.
+// It buffers the response up to maxBody bytes. A response growing past maxBody
+// is marked as overflowed and, from then on, streamed to sink instead of
+// buffered, so memory stays bounded by maxBody plus the write in progress.
+//
+// It snapshots headers when the status is written and ignores 1xx informational
+// responses. Flush is a no-op until the response is streamed. Hijack and Unwrap
+// are not supported, so handlers cannot reach the underlying connection.
 type recorder struct {
+	sink     streamSink
 	header   http.Header
 	snapshot http.Header
-	body     bytes.Buffer
-	maxBody  int
-	status   int
+	// streamErr is the error that prevented streaming the overflowed response;
+	// further writes are discarded and fail with it.
+	streamErr error
+	body      bytes.Buffer
+	maxBody   int
+	status    int
 	// invalidStatus is the out-of-range code the handler passed to WriteHeader,
 	// valid only when hasInvalidStatus is set (the code itself may be 0).
 	invalidStatus    int
 	overflow         bool
+	streaming        bool
 	hasInvalidStatus bool
 }
 
-// newRecorder creates a recorder that marks responses larger than maxBody as overflowed.
-// A maxBody of zero or less disables the limit.
-func newRecorder(maxBody int) *recorder {
+// newRecorder creates a recorder that buffers responses up to maxBody bytes and
+// streams larger ones to sink, marking them as overflowed. A maxBody of zero or
+// less disables the limit. A nil sink discards overflowed responses.
+func newRecorder(maxBody int, sink streamSink) *recorder {
 	return &recorder{
 		header:  make(http.Header),
 		maxBody: maxBody,
+		sink:    sink,
 	}
 }
 
@@ -99,9 +125,14 @@ func canonicalHeader(h http.Header) http.Header {
 	return out
 }
 
-// Write buffers the response body, writing an implicit 200 status first if needed.
-// It keeps buffering past the size limit so that the leader still receives the
-// full response, but marks the response as overflowed.
+// Write records the response body, writing an implicit 200 status first if needed.
+//
+// The body is buffered while it fits maxBody. The write that makes it outgrow
+// maxBody marks the response as overflowed, starts streaming it to the sink and
+// releases the buffer; later writes go straight to the sink. When streaming is
+// not possible (no client to stream to, or the client write failed) the error
+// is returned and later writes are discarded with the same error, so the
+// handler can stop early. An overflowed response is never stored or shared.
 func (r *recorder) Write(p []byte) (int, error) {
 	if r.status == 0 {
 		r.WriteHeader(http.StatusOK)
@@ -111,17 +142,48 @@ func (r *recorder) Write(p []byte) (int, error) {
 		return 0, http.ErrBodyNotAllowed
 	}
 
-	n, err := r.body.Write(p)
-
-	if r.maxBody > 0 && r.body.Len() > r.maxBody {
-		r.overflow = true
+	switch {
+	case r.streaming:
+		return r.sink.write(p)
+	case r.streamErr != nil:
+		return 0, r.streamErr
+	case r.maxBody > 0 && r.body.Len()+len(p) > r.maxBody:
+		return r.startStream(p)
+	default:
+		return r.body.Write(p)
 	}
-
-	return n, err
 }
 
-// Flush is a no-op: the response is buffered until the handler returns.
-func (r *recorder) Flush() {}
+// startStream marks the response as overflowed and hands it to the sink,
+// releasing the buffered body.
+func (r *recorder) startStream(p []byte) (int, error) {
+	r.overflow = true
+
+	err := errStreamDetached
+	if r.sink != nil {
+		err = r.sink.startStream(r.status, r.snapshot, r.body.Bytes(), p)
+	}
+
+	r.body = bytes.Buffer{}
+
+	if err != nil {
+		r.streamErr = err
+		return 0, err
+	}
+
+	r.streaming = true
+
+	return len(p), nil
+}
+
+// Flush flushes the streamed response to the client. It is a no-op while the
+// response is buffered, since nothing was sent yet.
+func (r *recorder) Flush() {
+	if r.streaming {
+		// Flush has no way to report the error; the next Write reports a broken client.
+		_ = r.sink.flush()
+	}
+}
 
 // result returns the captured response, applying an implicit 200 status when
 // the handler wrote nothing.
