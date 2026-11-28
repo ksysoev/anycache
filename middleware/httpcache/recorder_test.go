@@ -150,9 +150,11 @@ type fakeSink struct {
 	starts    int
 	flushes   int
 	startSize int
+	// startN is the number of bytes of p reported written when startErr is set.
+	startN int
 }
 
-func (s *fakeSink) startStream(status int, header http.Header, buffered, p []byte) error {
+func (s *fakeSink) startStream(status int, header http.Header, buffered, p []byte) (int, error) {
 	s.starts++
 	s.status = status
 	s.header = header
@@ -160,7 +162,11 @@ func (s *fakeSink) startStream(status int, header http.Header, buffered, p []byt
 	s.buffered = append([]byte(nil), buffered...)
 	s.first = append([]byte(nil), p...)
 
-	return s.startErr
+	if s.startErr != nil {
+		return s.startN, s.startErr
+	}
+
+	return len(p), nil
 }
 
 func (s *fakeSink) write(p []byte) (int, error) {
@@ -193,6 +199,7 @@ func TestRecorder_Streaming(t *testing.T) {
 		wantFlushes  int
 		flushAfter   int
 		maxBody      int
+		startN       int
 		wantOverflow bool
 		wantLost     bool
 	}{
@@ -231,6 +238,19 @@ func TestRecorder_Streaming(t *testing.T) {
 			startErr:     errClientGone,
 			writes:       []string{"1234", "5678", "90"},
 			flushAfter:   2,
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, errClientGone, errClientGone},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client write failing during the stream start reports the bytes written",
+			maxBody:      5,
+			startErr:     errClientGone,
+			startN:       2,
+			writes:       []string{"1234", "5678", "90"},
 			wantBuffered: "1234",
 			wantFirst:    "5678",
 			wantErrs:     []error{nil, errClientGone, errClientGone},
@@ -278,16 +298,24 @@ func TestRecorder_Streaming(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sink := &fakeSink{startErr: tt.startErr, writeErr: tt.writeErr}
+			sink := &fakeSink{startErr: tt.startErr, writeErr: tt.writeErr, startN: tt.startN}
 			rec := newRecorder(tt.maxBody, sink)
 			rec.Header().Set("X-Test", "1")
 
 			for i, chunk := range tt.writes {
+				starts := sink.starts
 				n, err := rec.Write([]byte(chunk))
 
 				if tt.wantErrs[i] != nil {
 					assert.ErrorIs(t, err, tt.wantErrs[i])
-					assert.Zero(t, n)
+
+					wantN := 0
+					if sink.starts > starts {
+						// The write that started the stream reports the bytes the sink wrote.
+						wantN = tt.startN
+					}
+
+					assert.Equal(t, wantN, n)
 				} else {
 					assert.NoError(t, err)
 					assert.Equal(t, len(chunk), n)

@@ -27,9 +27,10 @@ type response struct {
 // All methods are called from the handler goroutine.
 type streamSink interface {
 	// startStream sends the status, the header and the bytes recorded so far,
-	// followed by p. It returns errStreamDetached when there is no client to
-	// stream to, or the error of writing to the client.
-	startStream(status int, header http.Header, buffered, p []byte) error
+	// followed by p. It returns the number of bytes of p written, and
+	// errStreamDetached when there is no client to stream to, or the error of
+	// writing to the client.
+	startStream(status int, header http.Header, buffered, p []byte) (int, error)
 	// write sends p to the client once the stream started.
 	write(p []byte) (int, error)
 	// flush flushes the data streamed so far to the client.
@@ -165,21 +166,21 @@ func (r *recorder) Write(p []byte) (int, error) {
 func (r *recorder) startStream(p []byte) (int, error) {
 	r.overflow = true
 
-	err := errStreamDetached
+	n, err := 0, errStreamDetached
 	if r.sink != nil {
-		err = r.sink.startStream(r.status, r.snapshot, r.body.Bytes(), p)
+		n, err = r.sink.startStream(r.status, r.snapshot, r.body.Bytes(), p)
 	}
 
 	r.body = bytes.Buffer{}
 
 	if err != nil {
 		r.streamErr = err
-		return 0, err
+		return n, err
 	}
 
 	r.streaming = true
 
-	return len(p), nil
+	return n, nil
 }
 
 // lostClient reports whether the response overflowed and had no client left to

@@ -240,7 +240,8 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 
 		// End the stream before reporting the result: once the generator returns
 		// and releases ctx, the streaming request must already see the stream end.
-		slot.endStream(res.pe == nil && res.late == nil)
+		// A failed client write may have truncated the streamed body.
+		slot.endStream(res.pe == nil && res.late == nil && !rec.lostClient())
 
 		done <- res
 	}()
@@ -644,8 +645,12 @@ func (s *requestSource) release(keep bool) {
 // it holds the recorded response and streams an oversized response to the
 // request's writer.
 //
-// The generator and the handler run in other goroutines, hence the mutex. Every
-// write to w happens under the mutex and is refused once detach ran, so nothing
+// The generator and the handler run in other goroutines, hence two mutexes: mu
+// guards the slot state and is never held across a write to w, so a write
+// stalled on a client that stopped reading never blocks the generator or
+// detach; writeMu serializes every use of w by the slot. When both are needed,
+// writeMu is taken first. Every write to w is refused once detach set detached,
+// and detach then waits for the write in progress by taking writeMu, so nothing
 // is written to w after the request's ServeHTTP returned.
 //
 // Once a stream started, the generator hands the running handler over to the
@@ -668,12 +673,14 @@ type leaderSlot struct {
 	cancel       context.CancelFunc
 	statusHeader string
 	mu           sync.Mutex
+	// writeMu is held while the slot writes to w.
+	writeMu sync.Mutex
 	// detached is set once w no longer takes writes from the slot: the request
 	// detached, or the generator gave up waiting for the handler (refuseStream).
 	detached  bool
 	streaming bool
-	// streamOK reports that the handler returned in time without panicking,
-	// valid once streamEnd is closed.
+	// streamOK reports that the handler returned in time without panicking and
+	// without a failed client write, valid once streamEnd is closed.
 	streamOK bool
 }
 
@@ -704,7 +711,7 @@ func (s *leaderSlot) begin(ctx context.Context) <-chan struct{} {
 }
 
 // endStream records that the handler returned, ok when it did so in time without
-// panicking, ending a stream in progress.
+// panicking and without a failed client write, ending a stream in progress.
 func (s *leaderSlot) endStream(ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -738,11 +745,12 @@ func (s *leaderSlot) handOff(cancel context.CancelFunc) {
 // ctx (the request context) to end or for the handler context to end (timeout),
 // since the response on w can no longer be replaced. If the stream did not end,
 // it sets a past write deadline on w (best effort) so that a handler write
-// stalled on a client that stopped reading returns and releases the mutex.
+// stalled on a client that stopped reading returns and releases writeMu, which
+// detach takes last to wait for the write in progress.
 //
 // It reports whether a response was streamed to w and whether that response is
-// complete: the handler returned in time without panicking, and no write
-// deadline was set on w.
+// complete: the handler returned in time without panicking and without a failed
+// client write, and no write deadline was set on w.
 func (s *leaderSlot) detach(ctx context.Context, w http.ResponseWriter) (streamed, complete bool) {
 	s.mu.Lock()
 
@@ -787,6 +795,10 @@ func (s *leaderSlot) detach(ctx context.Context, w http.ResponseWriter) (streame
 
 	s.mu.Unlock()
 
+	// Wait for a write in progress: later ones see detached and are refused.
+	s.writeMu.Lock()
+	s.writeMu.Unlock() //nolint:gocritic,staticcheck // Empty critical section: it only waits for the write in progress.
+
 	if cancel != nil {
 		cancel()
 	}
@@ -796,17 +808,18 @@ func (s *leaderSlot) detach(ctx context.Context, w http.ResponseWriter) (streame
 
 // startStream writes the status, the header (without trailers, whose values were
 // never recorded) and the response body so far to the request's writer, reporting
-// it as BYPASS. It returns errStreamDetached once the request no longer waits for
-// the response.
-func (s *leaderSlot) startStream(status int, header http.Header, buffered, p []byte) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// it as BYPASS. It returns the number of bytes of p written, and errStreamDetached
+// once the request no longer waits for the response.
+func (s *leaderSlot) startStream(status int, header http.Header, buffered, p []byte) (int, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	if s.detached {
-		return errStreamDetached
+	w, err := s.beginStream()
+	if err != nil {
+		return 0, err
 	}
 
-	h := s.w.Header()
+	h := w.Header()
 
 	for name, values := range header {
 		if isTrailer(name) {
@@ -820,27 +833,56 @@ func (s *leaderSlot) startStream(status int, header http.Header, buffered, p []b
 		h.Set(s.statusHeader, StatusBypass)
 	}
 
-	s.w.WriteHeader(status)
+	w.WriteHeader(status)
+
+	if _, err := w.Write(buffered); err != nil {
+		return 0, fmt.Errorf("httpcache: stream response: %w", err)
+	}
+
+	n, err := w.Write(p)
+	if err != nil {
+		return n, fmt.Errorf("httpcache: stream response: %w", err)
+	}
+
+	return n, nil
+}
+
+// beginStream marks the response as streaming to the request's writer and
+// returns that writer, or errStreamDetached once the request no longer waits for
+// the response. The caller holds writeMu and writes the response start next.
+func (s *leaderSlot) beginStream() (http.ResponseWriter, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.detached {
+		return nil, errStreamDetached
+	}
+
 	s.streaming = true
 	s.streamEnd = make(chan struct{})
 
-	// The response started on w and can no longer be replaced: hand it off
-	// whatever the body writes below do, so that the waiting requests are
+	// The response starts on w and can no longer be replaced: hand it off
+	// whatever the writes of the caller do, so that the waiting requests are
 	// released rather than given the outcome of a broken stream.
 	if s.started != nil {
 		close(s.started)
 		s.started = nil
 	}
 
-	if _, err := s.w.Write(buffered); err != nil {
-		return fmt.Errorf("httpcache: stream response: %w", err)
+	return s.w, nil
+}
+
+// writer returns the request's writer, or errStreamDetached once the request
+// detached. The caller holds writeMu.
+func (s *leaderSlot) writer() (http.ResponseWriter, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.detached {
+		return nil, errStreamDetached
 	}
 
-	if _, err := s.w.Write(p); err != nil {
-		return fmt.Errorf("httpcache: stream response: %w", err)
-	}
-
-	return nil
+	return s.w, nil
 }
 
 // refuseStream makes later calls to startStream fail with errStreamDetached,
@@ -861,26 +903,28 @@ func (s *leaderSlot) refuseStream() (started bool) {
 
 // write writes p to the request's writer, or returns errStreamDetached.
 func (s *leaderSlot) write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	if s.detached {
-		return 0, errStreamDetached
+	w, err := s.writer()
+	if err != nil {
+		return 0, err
 	}
 
-	return s.w.Write(p)
+	return w.Write(p)
 }
 
 // flush flushes the request's writer, or returns errStreamDetached.
 func (s *leaderSlot) flush() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-	if s.detached {
-		return errStreamDetached
+	w, err := s.writer()
+	if err != nil {
+		return err
 	}
 
-	if err := http.NewResponseController(s.w).Flush(); err != nil {
+	if err := http.NewResponseController(w).Flush(); err != nil {
 		return fmt.Errorf("httpcache: flush response: %w", err)
 	}
 

@@ -84,8 +84,11 @@
 // the request waits until the stalled write fails. Closing the cache does not
 // cancel a response that is already streaming. When the response has no client to
 // stream to (a WithWarmUpTTL refresh, or a client that went away) the oversized
-// body is discarded and the handler's writes fail, so it can stop early; a
-// handler aborting with http.ErrAbortHandler on such a failed write (as
+// body is discarded and the handler's writes fail, so it can stop early. The
+// exception is a refresh that outgrows the limit before the request that
+// triggered it got the cached response: it streams to that request instead,
+// which then receives the fresh body reported as BYPASS rather than the cached
+// one. A handler aborting with http.ErrAbortHandler on such a failed write (as
 // httputil.ReverseProxy does) is not reported as a 502 to the waiting requests,
 // which run the handler themselves.
 // Before the limit is reached Flush is a no-op, and Hijack is unsupported.
