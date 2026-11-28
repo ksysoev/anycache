@@ -77,9 +77,12 @@
 // WithMaxBodySize plus the write in progress, so routes serving large downloads
 // can be wrapped. WithTimeout still bounds the whole handler run, streaming
 // included, so raise it for slow downloads; when it expires, or the client goes
-// away, mid-stream, the handler context is cancelled and the connection aborted,
-// even when the client stopped reading. Closing the cache does not cancel a
-// response that is already streaming. When the response has no client to
+// away, mid-stream, the handler context is cancelled and the connection aborted.
+// A client that stopped reading can only be aborted if its writer supports
+// write deadlines (http.ResponseController.SetWriteDeadline: wrapping writers
+// must implement Unwrap) or the server sets http.Server.WriteTimeout; otherwise
+// the request waits until the stalled write fails. Closing the cache does not
+// cancel a response that is already streaming. When the response has no client to
 // stream to (a WithWarmUpTTL refresh, or a client that went away) the oversized
 // body is discarded and the handler's writes fail, so it can stop early; a
 // handler aborting with http.ErrAbortHandler on such a failed write (as

@@ -121,7 +121,9 @@ func WithMaxBodySize(n int) Option {
 // A handler that ignores its context keeps running in the background until it
 // returns. The timeout also bounds a response streamed past WithMaxBodySize: if
 // it expires mid-stream, the connection of the streaming request is aborted,
-// so allow enough time for large downloads.
+// so allow enough time for large downloads. Aborting a client that stopped
+// reading requires write deadline support on its writer (wrapping writers must
+// implement Unwrap) or http.Server.WriteTimeout.
 //
 // Zero or less disables the middleware timeout; the shared work is then bounded
 // only by the context deadline of the request that started it. Requests served

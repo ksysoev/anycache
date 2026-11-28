@@ -141,9 +141,8 @@ func (m *Middleware) serve(w http.ResponseWriter, r *http.Request, next http.Han
 	// on a hit it is corrupt data, which writeEntry removes.
 	if state == anycache.CacheMiss && isPassMarker(data) {
 		// Only the leader holds the private response; followers run the handler themselves.
-		// An overflowed response that was not streamed has no body to write.
-		if resp := slot.get(); resp != nil && !resp.overflow {
-			m.writeRecorded(w, resp, StatusBypass)
+		if resp := slot.get(); resp != nil {
+			m.writeOwn(w, resp, key, StatusBypass)
 			return
 		}
 
@@ -248,15 +247,31 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 
 	select {
 	case res := <-done:
+		// A response that started streaming is handed off even when the handler
+		// returned as well: the waiting requests must not get its outcome.
+		select {
+		case <-started:
+			m.logStreamed(res, rec, key)
+			return nil, true, nil
+		default:
+		}
+
 		resp, err := m.finish(res.late, rec, res.pe, key)
+
 		return resp, false, err
 	case <-started:
 		go m.logHandedOff(done, rec, key)
 		return nil, true, nil
 	case <-ctx.Done():
+		if slot.refuseStream() {
+			// The response started streaming before the timeout was noticed.
+			go m.logHandedOff(done, rec, key)
+			return nil, true, nil
+		}
+
 		// The handler keeps running in the background until it returns. Only its
-		// goroutine still touches rec, and its output is discarded: a streamed
-		// response is aborted and the leader's writer detached.
+		// goroutine still touches rec, and its output is discarded: the slot now
+		// refuses to start a stream, so the waiting requests get the timeout.
 		te := newTimeoutError(context.Cause(ctx))
 		m.cfg.logger.Warn("httpcache: handler did not finish in time", "key", key, "error", te.cause)
 
@@ -268,8 +283,12 @@ func (m *Middleware) execute(ctx context.Context, next http.Handler, r *http.Req
 // streaming request and logs its failure, if any. Nobody else waits for its
 // result: the streaming request only learns whether the stream completed.
 func (m *Middleware) logHandedOff(done <-chan handlerResult, rec *recorder, key string) {
-	res := <-done
+	m.logStreamed(<-done, rec, key)
+}
 
+// logStreamed logs the failure, if any, of a handler whose response was handed
+// off to the streaming request.
+func (m *Middleware) logStreamed(res handlerResult, rec *recorder, key string) {
 	if errors.Is(res.late, context.Canceled) {
 		// After the hand-off only the streaming request cancels the handler, once it
 		// is gone or aborted the stream: whatever the handler did next is moot.
@@ -303,7 +322,8 @@ func (m *Middleware) finish(late error, rec *recorder, pe *panicError, key strin
 	case pe != nil && pe.value == http.ErrAbortHandler && rec.lostClient():
 		// The handler aborted because its oversized response had no client left to
 		// stream to (for example httputil.ReverseProxy failing to copy the body):
-		// the request that ran it is gone, or this is a warm-up. The response is
+		// the request that ran it is gone, its client write failed, or this is a
+		// warm-up. The response is
 		// passed, so the waiting requests run the handler themselves.
 		m.cfg.logger.Debug("httpcache: handler aborted a response with no client to stream to", "key", key)
 		return rec.result(time.Now()), nil
@@ -349,11 +369,11 @@ func (m *Middleware) handleError(w http.ResponseWriter, r *http.Request, next ht
 	case r.Context().Err() != nil:
 		// The client is gone, nothing to respond to.
 	default:
-		if resp := slot.get(); resp != nil && !resp.overflow {
+		if resp := slot.get(); resp != nil {
 			// Safety net: CacheC does not report storage write failures, but should
 			// the cache fail after the handler ran, never run it twice.
 			m.cfg.logger.Warn("httpcache: cache error after the handler ran", "key", key, "error", err)
-			m.writeRecorded(w, resp, StatusMiss)
+			m.writeOwn(w, resp, key, StatusMiss)
 
 			return
 		}
@@ -409,6 +429,23 @@ func (m *Middleware) invalidate(r *http.Request, key string) {
 	if err := m.cache.Invalidate(ctx, key); err != nil {
 		m.cfg.logger.Warn("httpcache: failed to invalidate invalid entry", "key", key, "error", err)
 	}
+}
+
+// writeOwn writes the response the handler recorded for this very request,
+// reporting status in the cache status header. An overflowed response that was
+// not streamed has no body left to write: it is answered with a 500 rather than
+// running the handler a second time. This cannot happen today, since a request
+// whose own response overflows always streams it, and is logged as an error.
+func (m *Middleware) writeOwn(w http.ResponseWriter, resp *response, key, status string) {
+	if resp.overflow {
+		m.cfg.logger.Error("httpcache: oversized response was neither streamed nor kept, responding 500", "key", key)
+		m.setStatus(w, StatusBypass)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+
+		return
+	}
+
+	m.writeRecorded(w, resp, status)
 }
 
 // writeRecorded writes the response recorded for this very request, reporting
@@ -615,12 +652,13 @@ func (s *requestSource) release(keep bool) {
 // slot (handOff): detach waits for the stream to end, then releases the handler
 // context.
 type leaderSlot struct {
-	// w is the request's writer; nil once detached.
+	// w is the request's writer; nil once the request detached.
 	w    http.ResponseWriter
 	resp *response
 	// runDone is the Done channel of the handler context, set by begin.
 	runDone <-chan struct{}
-	// started is created by begin and closed once the response started streaming.
+	// started is created by begin, then closed and cleared once the response
+	// started streaming.
 	started chan struct{}
 	// streamEnd is created when a stream starts and closed when the handler
 	// returns, so the request can wait for a stream in progress. It is only
@@ -630,8 +668,10 @@ type leaderSlot struct {
 	cancel       context.CancelFunc
 	statusHeader string
 	mu           sync.Mutex
-	detached     bool
-	streaming    bool
+	// detached is set once w no longer takes writes from the slot: the request
+	// detached, or the generator gave up waiting for the handler (refuseStream).
+	detached  bool
+	streaming bool
 	// streamOK reports that the handler returned in time without panicking,
 	// valid once streamEnd is closed.
 	streamOK bool
@@ -701,7 +741,8 @@ func (s *leaderSlot) handOff(cancel context.CancelFunc) {
 // stalled on a client that stopped reading returns and releases the mutex.
 //
 // It reports whether a response was streamed to w and whether that response is
-// complete: the handler returned in time without panicking.
+// complete: the handler returned in time without panicking, and no write
+// deadline was set on w.
 func (s *leaderSlot) detach(ctx context.Context, w http.ResponseWriter) (streamed, complete bool) {
 	s.mu.Lock()
 
@@ -722,18 +763,25 @@ func (s *leaderSlot) detach(ctx context.Context, w http.ResponseWriter) (streame
 	case <-run:
 	}
 
+	deadlineSet := false
+
 	select {
 	case <-end:
 	default:
-		// Writers without deadline support (http.ErrNotSupported) cannot stall.
-		_ = http.NewResponseController(w).SetWriteDeadline(time.Now())
+		// Best effort: a writer without deadline support (http.ErrNotSupported,
+		// for example a wrapper without Unwrap) leaves a write stalled on a client
+		// that stopped reading blocked, and detach with it, until the write fails
+		// on its own (http.Server.WriteTimeout, connection closed).
+		deadlineSet = http.NewResponseController(w).SetWriteDeadline(time.Now()) == nil
 	}
 
 	s.mu.Lock()
 
 	s.detached = true
 	s.w = nil
-	complete = s.streamOK
+	// Past the deadline the response may be truncated even if the handler then
+	// returned cleanly.
+	complete = s.streamOK && !deadlineSet
 	cancel := s.cancel
 	s.cancel = nil
 
@@ -776,6 +824,14 @@ func (s *leaderSlot) startStream(status int, header http.Header, buffered, p []b
 	s.streaming = true
 	s.streamEnd = make(chan struct{})
 
+	// The response started on w and can no longer be replaced: hand it off
+	// whatever the body writes below do, so that the waiting requests are
+	// released rather than given the outcome of a broken stream.
+	if s.started != nil {
+		close(s.started)
+		s.started = nil
+	}
+
 	if _, err := s.w.Write(buffered); err != nil {
 		return fmt.Errorf("httpcache: stream response: %w", err)
 	}
@@ -784,11 +840,23 @@ func (s *leaderSlot) startStream(status int, header http.Header, buffered, p []b
 		return fmt.Errorf("httpcache: stream response: %w", err)
 	}
 
-	if s.started != nil {
-		close(s.started)
+	return nil
+}
+
+// refuseStream makes later calls to startStream fail with errStreamDetached,
+// once the generator gave up waiting for the handler (timeout). It reports
+// whether a stream already started, in which case nothing changes.
+func (s *leaderSlot) refuseStream() (started bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.streaming {
+		return true
 	}
 
-	return nil
+	s.detached = true
+
+	return false
 }
 
 // write writes p to the request's writer, or returns errStreamDetached.

@@ -226,7 +226,7 @@ func TestRecorder_Streaming(t *testing.T) {
 			wantOverflow: true,
 		},
 		{
-			name:         "failed stream start discards the rest",
+			name:         "failed stream start loses the client and discards the rest",
 			maxBody:      5,
 			startErr:     errClientGone,
 			writes:       []string{"1234", "5678", "90"},
@@ -236,6 +236,19 @@ func TestRecorder_Streaming(t *testing.T) {
 			wantErrs:     []error{nil, errClientGone, errClientGone},
 			wantStarts:   1,
 			wantOverflow: true,
+			wantLost:     true,
+		},
+		{
+			name:         "client write failing mid-stream loses the client",
+			maxBody:      5,
+			writeErr:     errClientGone,
+			writes:       []string{"1234", "5678", "90"},
+			wantBuffered: "1234",
+			wantFirst:    "5678",
+			wantErrs:     []error{nil, nil, errClientGone},
+			wantStarts:   1,
+			wantOverflow: true,
+			wantLost:     true,
 		},
 		{
 			name:         "stream start without a client loses the client",
